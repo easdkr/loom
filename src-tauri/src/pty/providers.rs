@@ -5,6 +5,8 @@ const DEFAULT_COMPLETION_TIMEOUT_MS: u64 = 30 * 60 * 1000;
 const DEFAULT_IDLE_TIMEOUT_MS: u64 = 5 * 60 * 1000;
 const DEFAULT_COLS: u16 = 220;
 const DEFAULT_ROWS: u16 = 50;
+pub const DEFAULT_SETTLE_MS: u64 = 800;
+pub const DEFAULT_MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 
 pub const DEFAULT_PROVIDERS_TOML: &str = r#"[[providers]]
 name = "shell"
@@ -13,10 +15,13 @@ command = "/bin/zsh"
 args = ["-lc"]
 input_mode = "append-arg"
 completion_pattern = "(?m)^LOOM_EXIT:\\d+\\r?$"
+error_pattern = ""
 cols = 220
 rows = 50
 completion_timeout_ms = 120000
 idle_timeout_ms = 30000
+settle_ms = 200
+max_output_bytes = 1048576
 env = { FORCE_COLOR = "0", NO_COLOR = "1", TERM = "xterm-256color" }
 
 [[providers]]
@@ -26,10 +31,13 @@ command = "claude"
 args = ["--permission-mode", "bypassPermissions"]
 input_mode = "append-arg"
 completion_pattern = "(?m)(Task complete|Done|Finished|>\\s*$)"
+error_pattern = "(?i)(rate.?limit|429 too many|usage limit|quota exceeded|context length exceeded)"
 cols = 220
 rows = 50
 completion_timeout_ms = 1800000
 idle_timeout_ms = 300000
+settle_ms = 1200
+max_output_bytes = 2097152
 env = { FORCE_COLOR = "0", NO_COLOR = "1", TERM = "xterm-256color" }
 
 [[providers]]
@@ -39,10 +47,13 @@ command = "codex"
 args = ["exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "--color", "never"]
 input_mode = "append-arg"
 completion_pattern = "(?m)(Task complete|Done|Finished)"
+error_pattern = "(?i)(rate.?limit|429 too many|usage limit|quota exceeded|context length exceeded)"
 cols = 220
 rows = 50
 completion_timeout_ms = 1800000
 idle_timeout_ms = 300000
+settle_ms = 1200
+max_output_bytes = 2097152
 env = { FORCE_COLOR = "0", NO_COLOR = "1", TERM = "xterm-256color" }
 
 [[providers]]
@@ -52,10 +63,13 @@ command = "cursor-agent"
 args = []
 input_mode = "stdin"
 completion_pattern = "(?m)(Task complete|Done|Finished|>\\s*$)"
+error_pattern = "(?i)(rate.?limit|429 too many|usage limit|quota exceeded|context length exceeded)"
 cols = 220
 rows = 50
 completion_timeout_ms = 1800000
 idle_timeout_ms = 300000
+settle_ms = 1200
+max_output_bytes = 2097152
 env = { FORCE_COLOR = "0", NO_COLOR = "1", TERM = "xterm-256color" }
 "#;
 
@@ -80,6 +94,8 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub completion_pattern: String,
     #[serde(default)]
+    pub error_pattern: String,
+    #[serde(default)]
     pub input_mode: ProviderInputMode,
     #[serde(default = "default_cols")]
     pub cols: u16,
@@ -89,6 +105,28 @@ pub struct ProviderConfig {
     pub completion_timeout_ms: u64,
     #[serde(default = "default_idle_timeout_ms")]
     pub idle_timeout_ms: u64,
+    #[serde(default = "default_settle_ms")]
+    pub settle_ms: u64,
+    #[serde(default = "default_max_output_bytes")]
+    pub max_output_bytes: usize,
+}
+
+impl ProviderConfig {
+    pub fn effective_settle_ms(&self) -> u64 {
+        if self.settle_ms == 0 {
+            DEFAULT_SETTLE_MS
+        } else {
+            self.settle_ms
+        }
+    }
+
+    pub fn effective_max_output_bytes(&self) -> usize {
+        if self.max_output_bytes == 0 {
+            DEFAULT_MAX_OUTPUT_BYTES
+        } else {
+            self.max_output_bytes.max(4096)
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -111,6 +149,14 @@ fn default_completion_timeout_ms() -> u64 {
 
 fn default_idle_timeout_ms() -> u64 {
     DEFAULT_IDLE_TIMEOUT_MS
+}
+
+fn default_settle_ms() -> u64 {
+    DEFAULT_SETTLE_MS
+}
+
+fn default_max_output_bytes() -> usize {
+    DEFAULT_MAX_OUTPUT_BYTES
 }
 
 pub fn providers_config_path() -> PathBuf {

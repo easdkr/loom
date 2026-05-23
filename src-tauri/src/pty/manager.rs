@@ -1,5 +1,8 @@
 use super::{
     ansi::strip_ansi,
+    completion::{
+        BoundedBuffer, CompletionDetector, DetectionKind, ErrorClass, DEFAULT_TAIL_WINDOW_BYTES,
+    },
     providers::{validate_provider_for_execution, ProviderConfig, ProviderInputMode},
     text::normalize_display_text,
     utf8::Utf8StreamDecoder,
@@ -44,6 +47,8 @@ pub struct PtyCompletePayload {
     pub completion_reason: String,
     pub exit_code: Option<u32>,
     pub timed_out: bool,
+    pub truncated: bool,
+    pub error_class: Option<ErrorClass>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,11 +64,15 @@ pub struct PtyRunOutcome {
     pub completion_reason: String,
     pub exit_code: Option<u32>,
     pub timed_out: bool,
+    pub truncated: bool,
+    pub error_class: Option<ErrorClass>,
 }
 
 impl PtyRunOutcome {
     pub fn success(&self) -> bool {
-        !self.timed_out && self.exit_code.unwrap_or(0) == 0
+        self.error_class.is_none()
+            && !self.timed_out
+            && self.exit_code.unwrap_or(0) == 0
     }
 }
 
@@ -125,6 +134,8 @@ impl PtyManager {
                         completion_reason: outcome.completion_reason.clone(),
                         exit_code: outcome.exit_code,
                         timed_out: outcome.timed_out,
+                        truncated: outcome.truncated,
+                        error_class: outcome.error_class,
                     },
                 );
                 Ok(outcome)
@@ -206,7 +217,15 @@ impl PtyManager {
         node_id: String,
     ) -> Result<PtyRunOutcome, String> {
         validate_provider_for_execution(&provider)?;
-        let completion_pattern = compile_completion_pattern(&provider)?;
+        let completion_pattern = compile_pattern(&provider.completion_pattern, "completion", &provider.name)?;
+        let error_pattern = compile_pattern(&provider.error_pattern, "error", &provider.name)?;
+        let mut detector = CompletionDetector::new(
+            completion_pattern,
+            error_pattern,
+            provider.effective_settle_ms(),
+            DEFAULT_TAIL_WINDOW_BYTES,
+        );
+        let mut buffer = BoundedBuffer::new(provider.effective_max_output_bytes());
         let pty_size = normalize_pty_size(
             task.cols.unwrap_or(provider.cols),
             task.rows.unwrap_or(provider.rows),
@@ -311,45 +330,74 @@ impl PtyManager {
         let idle_timeout = Duration::from_millis(provider.idle_timeout_ms);
         let started_at = Instant::now();
         let mut last_output_at = Instant::now();
-        let mut raw_output = String::new();
         let mut exit_code = None;
         let mut timed_out = false;
+        let mut error_class: Option<ErrorClass> = None;
+        let mut completion_seen = false;
 
         let completion_reason = loop {
             match reader_rx.recv_timeout(Duration::from_millis(50)) {
                 Ok(ReaderEvent::Data(chunk)) => {
                     last_output_at = Instant::now();
-                    raw_output.push_str(&chunk);
+                    buffer.append(&chunk);
                     let _ = app.emit(
                         "pty:data",
                         PtyDataPayload {
                             node_id: node_id.clone(),
-                            chunk,
+                            chunk: chunk.clone(),
                         },
                     );
 
-                    if let Some(pattern) = &completion_pattern {
-                        if pattern.is_match(&strip_ansi(&raw_output)) {
-                            break "completion-pattern".to_string();
+                    if let Some(detection) = detector.push(&chunk) {
+                        match detection.kind {
+                            DetectionKind::Error => {
+                                error_class = Some(CompletionDetector::classify_error_in_chunk(
+                                    &chunk,
+                                    &provider.error_pattern,
+                                ));
+                                break "provider-error".to_string();
+                            }
+                            DetectionKind::Completion => {
+                                completion_seen = true;
+                            }
                         }
                     }
                 }
                 Ok(ReaderEvent::Eof) => {
-                    break "eof".to_string();
+                    break if completion_seen {
+                        "completion-pattern".to_string()
+                    } else {
+                        "eof".to_string()
+                    };
                 }
                 Ok(ReaderEvent::Error(error)) => {
                     return Err(format!("failed to read from node {node_id}: {error}"));
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    break "reader-disconnected".to_string();
+                    break if completion_seen {
+                        "completion-pattern".to_string()
+                    } else {
+                        "reader-disconnected".to_string()
+                    };
                 }
+            }
+
+            if detector.is_settled(last_output_at) {
+                break "completion-pattern".to_string();
             }
 
             match child.try_wait() {
                 Ok(Some(status)) => {
                     exit_code = Some(status.exit_code());
-                    break "process-exit".to_string();
+                    // If the completion pattern fired before the process exited,
+                    // preserve that semantic — the work was done before exit, not
+                    // accidentally because the process exited.
+                    break if completion_seen {
+                        "completion-pattern".to_string()
+                    } else {
+                        "process-exit".to_string()
+                    };
                 }
                 Ok(None) => {}
                 Err(error) => return Err(format!("failed to poll node {node_id}: {error}")),
@@ -360,7 +408,7 @@ impl PtyManager {
                 break "timeout-fallback".to_string();
             }
 
-            if !raw_output.is_empty() && last_output_at.elapsed() > idle_timeout {
+            if buffer.byte_length() > 0 && last_output_at.elapsed() > idle_timeout {
                 timed_out = true;
                 break "idle-timeout-fallback".to_string();
             }
@@ -385,6 +433,7 @@ impl PtyManager {
             .map_err(|_| "failed to lock PTY sessions".to_string())?
             .remove(&node_id);
 
+        let raw_output = buffer.to_string_value();
         Ok(PtyRunOutcome {
             node_id,
             result: normalize_display_text(&strip_ansi(&raw_output))
@@ -393,18 +442,25 @@ impl PtyManager {
             completion_reason,
             exit_code,
             timed_out,
+            truncated: buffer.was_truncated(),
+            error_class,
         })
     }
 }
 
-fn compile_completion_pattern(provider: &ProviderConfig) -> Result<Option<Regex>, String> {
-    if provider.completion_pattern.trim().is_empty() {
+fn compile_pattern(
+    pattern: &str,
+    kind: &str,
+    provider_name: &str,
+) -> Result<Option<Regex>, String> {
+    let trimmed = pattern.trim();
+    if trimmed.is_empty() {
         return Ok(None);
     }
 
-    Regex::new(&provider.completion_pattern)
-        .map(Some)
-        .map_err(|error| format!("invalid completion pattern for {}: {error}", provider.name))
+    Regex::new(trimmed).map(Some).map_err(|error| {
+        format!("invalid {kind} pattern for {provider_name}: {error}")
+    })
 }
 
 fn normalize_pty_size(cols: u16, rows: u16) -> PtySize {

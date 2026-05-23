@@ -1,5 +1,8 @@
 import type { ProviderConfig } from "./types";
 
+const RATE_LIMIT_PATTERN =
+  "(?i)(rate.?limit|429 too many|usage limit|quota exceeded|context length exceeded)";
+
 export const fallbackProviders: ProviderConfig[] = [
   {
     name: "shell",
@@ -13,6 +16,9 @@ export const fallbackProviders: ProviderConfig[] = [
     rows: 50,
     completion_timeout_ms: 120000,
     idle_timeout_ms: 30000,
+    error_pattern: "",
+    settle_ms: 200,
+    max_output_bytes: 1048576,
   },
   {
     name: "claude-code",
@@ -26,6 +32,9 @@ export const fallbackProviders: ProviderConfig[] = [
     rows: 50,
     completion_timeout_ms: 1800000,
     idle_timeout_ms: 300000,
+    error_pattern: RATE_LIMIT_PATTERN,
+    settle_ms: 1200,
+    max_output_bytes: 2097152,
   },
   {
     name: "codex",
@@ -46,6 +55,9 @@ export const fallbackProviders: ProviderConfig[] = [
     rows: 50,
     completion_timeout_ms: 1800000,
     idle_timeout_ms: 300000,
+    error_pattern: RATE_LIMIT_PATTERN,
+    settle_ms: 1200,
+    max_output_bytes: 2097152,
   },
   {
     name: "cursor",
@@ -59,6 +71,9 @@ export const fallbackProviders: ProviderConfig[] = [
     rows: 50,
     completion_timeout_ms: 1800000,
     idle_timeout_ms: 300000,
+    error_pattern: RATE_LIMIT_PATTERN,
+    settle_ms: 1200,
+    max_output_bytes: 2097152,
   },
 ];
 

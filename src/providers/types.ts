@@ -12,6 +12,20 @@ export interface ProviderConfig {
   rows: number;
   completion_timeout_ms: number;
   idle_timeout_ms: number;
+  /** Provider-specific error pattern (rate limit, quota, fatal). Optional. */
+  error_pattern?: string;
+  /**
+   * Time the completion pattern must remain stable (no new output) before
+   * the session is finalized. Defends against false positives where the
+   * model momentarily emits a completion-looking phrase. Defaults to 800ms.
+   */
+  settle_ms?: number;
+  /**
+   * Maximum bytes retained from the PTY raw output. Older bytes are
+   * discarded (FIFO) once exceeded; the final result reports `truncated`.
+   * Defaults to 1 MiB.
+   */
+  max_output_bytes?: number;
 }
 
 export interface ProvidersResponse {
@@ -41,6 +55,8 @@ export interface PtyCompletePayload {
   completion_reason: string;
   exit_code: number | null;
   timed_out: boolean;
+  truncated?: boolean;
+  error_class?: "rate-limit" | "provider-error" | null;
 }
 
 export interface PtyErrorPayload {

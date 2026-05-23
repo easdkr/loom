@@ -39,17 +39,22 @@ export function RunSingle(props: RunSingleProps) {
     });
     session.on("complete", (result: PtyOutcome) => {
       setOutcome(result);
-      const level: StatusLevel = result.timedOut
-        ? "warning"
-        : (result.exitCode ?? 0) === 0
-          ? "complete"
-          : "error";
+      const level: StatusLevel = result.errorClass
+        ? "error"
+        : result.timedOut
+          ? "warning"
+          : (result.exitCode ?? 0) === 0
+            ? "complete"
+            : "error";
       setStatus(level);
-      setMessage(
-        `${result.completionReason} · exit ${result.exitCode ?? "n/a"}${
-          result.timedOut ? " · timed out" : ""
-        }`,
-      );
+      const annotations = [
+        `${result.completionReason}`,
+        `exit ${result.exitCode ?? "n/a"}`,
+        result.timedOut ? "timed out" : null,
+        result.errorClass ? `error: ${result.errorClass}` : null,
+        result.truncated ? "output truncated" : null,
+      ].filter(Boolean);
+      setMessage(annotations.join(" · "));
       setTimeout(() => exit(), 30);
     });
 

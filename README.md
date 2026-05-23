@@ -103,7 +103,16 @@ loom/
 
 ## 상태
 
-🚧 **초기 구현 진행 중** — Phase 1 PTY 런타임과 Phase 2 TUI 어댑터까지 완료. Phase 3 Desktop GUI는 진행 전.
+🚧 **초기 구현 진행 중** — Phase 1~4 (PTY 런타임, TUI 어댑터, Desktop GUI, 플러그인/템플릿/HumanReview) 완료. Phase 5 안정화(완료 감지 강화, 에러 복구, 출력 버퍼 캡, 문서) 1차 작업 반영.
+
+Phase 5 PTY 강화 내용:
+- **Sliding tail window 완료 감지** — 매 chunk마다 풀 버퍼를 ANSI strip하던 O(N²) 패턴을 32 KiB tail window로 교체.
+- **Settle window** — 완료 패턴 매치 후 `settle_ms` 동안 추가 출력이 없을 때만 finalize. 본문에 등장하는 "Task complete" 같은 false positive 차단.
+- **Error pattern + classification** — rate-limit / quota / 429 등을 outcome `error_class`로 분류해 그래프 실행기가 fail-fast 처리.
+- **Bounded output buffer** — 기본 1 MiB (claude/codex 2 MiB) FIFO 회전. `truncated` 플래그로 마킹.
+- **완료 감지 우선 처리** — 패턴 매치 후 process가 빠르게 exit해도 reason은 `completion-pattern`으로 유지.
+
+가이드: [`docs/PROVIDERS.md`](docs/PROVIDERS.md) · [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
 
 ## 라이선스
 

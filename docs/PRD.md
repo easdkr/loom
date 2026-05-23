@@ -709,15 +709,26 @@ ExecutionPlan {
 ### Phase 5 — 안정화 (2주)
 - PTY 완료 감지 엣지케이스, 에러 복구, 성능 최적화, 문서화
 
+**Phase 5 1차 진행** (✓ 반영, ◔ 부분, ✗ 미착수):
+- ✓ Sliding tail-window 완료 감지 (Rust + TUI 양쪽 `CompletionDetector`)
+- ✓ Settle window — 완료 패턴 false positive 방어 (`settle_ms` per-provider)
+- ✓ `error_pattern` + `error_class` (rate-limit / provider-error) 분류
+- ✓ `BoundedBuffer` 출력 캡 (FIFO 회전 + `truncated` 플래그)
+- ✓ 완료 패턴 매치 후 process 조기 종료 시에도 `completion-pattern` 유지
+- ✓ 문서: [`docs/PROVIDERS.md`](PROVIDERS.md), [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
+- ◔ Rate limit retry/backoff — 자동 재시도는 의도적 보류 (사용자가 다음 행동 결정)
+- ✗ Windows ConPTY 경로 검증
+
 ---
 
 ## 13. 미결 사항 및 리스크
 
-- **PTY 완료 감지**: CLI마다 다른 완료 신호 + 업데이트마다 변동. 타임아웃 fallback 필수, false positive 방어.
-- **ANSI 코드 노이즈**: `NO_COLOR=1`로도 색이 새는 CLI 존재. `strip-ansi` 후처리 필수.
-- **컨텍스트 오염**: 장시간 PTY 세션은 결과 품질 저하. 작업 단위 재시작이 기본값.
-- **Rate Limit**: 동일 Provider 동시 실행 시 충돌. Token Bucket 스로틀링.
-- **Windows 지원**: `portable-pty` ConPTY 경로 별도 검증. Phase 5 이후로 미룸.
+- **PTY 완료 감지** (Phase 5에서 완화): tail-window 매칭 + `settle_ms` settle window + `idle_timeout_ms` fallback으로 false positive 방어. 그래도 새 CLI를 등록할 때는 `docs/PROVIDERS.md` 체크리스트 권장.
+- **ANSI 코드 노이즈**: `NO_COLOR=1`로도 색이 새는 CLI 존재. `strip-ansi` 후처리 필수. (구현됨)
+- **컨텍스트 오염**: 장시간 PTY 세션은 결과 품질 저하. 작업 단위 재시작이 기본값. (구현됨)
+- **Rate Limit** (Phase 5에서 완화): `error_pattern`으로 감지 후 outcome `error_class=rate-limit`로 분류, 그래프 실행기가 fail-fast. 자동 재시도는 의도적 보류.
+- **출력 버퍼 무한 증가** (Phase 5에서 완화): `max_output_bytes` FIFO 회전으로 메모리 상한 보장.
+- **Windows 지원**: `portable-pty` ConPTY 경로 별도 검증. Phase 5+ 미해결.
 
 ---
 

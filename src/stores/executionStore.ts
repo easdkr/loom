@@ -15,6 +15,8 @@ export interface NodeExecution {
   exitCode?: number | null;
   completionReason?: string;
   error?: string;
+  truncated?: boolean;
+  errorClass?: "rate-limit" | "provider-error" | null;
 }
 
 interface ExecutionState {

@@ -1,7 +1,14 @@
 import { spawn, type IPty } from "node-pty";
 import { EventEmitter } from "node:events";
 import type { ProviderConfig } from "../../../src/providers/types.js";
-import { cleanForDisplay, stripAnsi } from "./ansi.js";
+import { cleanForDisplay } from "./ansi.js";
+import {
+  BoundedBuffer,
+  CompletionDetector,
+  DEFAULT_MAX_OUTPUT_BYTES,
+  DEFAULT_SETTLE_MS,
+  type Detection,
+} from "./completion.js";
 import { materializePrompt, type MaterializedPrompt } from "./promptHandoff.js";
 import { promptForProvider } from "./providerPrompt.js";
 import { validateProviderForExecution } from "./providerLoader.js";
@@ -12,7 +19,10 @@ export type CompletionReason =
   | "process-exit"
   | "timeout-fallback"
   | "idle-timeout-fallback"
+  | "provider-error"
   | "killed";
+
+export type ErrorClass = "rate-limit" | "provider-error" | null;
 
 export interface PtyOutcome {
   nodeId: string;
@@ -20,6 +30,8 @@ export interface PtyOutcome {
   completionReason: CompletionReason;
   exitCode: number | null;
   timedOut: boolean;
+  truncated: boolean;
+  errorClass: ErrorClass;
 }
 
 export interface PtySessionOptions {
@@ -39,6 +51,7 @@ const EXIT_GRACE_MS = 1500;
 interface PendingFinish {
   reason: CompletionReason;
   timedOut: boolean;
+  errorClass: ErrorClass;
   graceTimer: NodeJS.Timeout | null;
 }
 
@@ -51,15 +64,18 @@ export class PtySession extends EventEmitter {
   private readonly rows: number;
   private readonly completionTimeoutMs: number;
   private readonly idleTimeoutMs: number;
-  private readonly completionPattern: RegExp | null;
+  private readonly settleMs: number;
+  private readonly detector: CompletionDetector;
+  private readonly buffer: BoundedBuffer;
   private readonly rawPrompt: string;
   private pty: IPty | null = null;
-  private rawOutput = "";
   private lastOutputAt = 0;
+  private lastDetection: Detection | null = null;
   private completed = false;
   private pending: PendingFinish | null = null;
   private killed = false;
   private timeoutTimer: NodeJS.Timeout | null = null;
+  private settleTimer: NodeJS.Timeout | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private materializedPrompt: MaterializedPrompt | null = null;
 
@@ -75,7 +91,15 @@ export class PtySession extends EventEmitter {
     this.completionTimeoutMs =
       options.timeoutMs ?? options.provider.completion_timeout_ms;
     this.idleTimeoutMs = options.provider.idle_timeout_ms;
-    this.completionPattern = compileRegex(options.provider.completion_pattern);
+    this.settleMs = options.provider.settle_ms ?? DEFAULT_SETTLE_MS;
+    this.detector = new CompletionDetector({
+      completionPattern: compileRegex(options.provider.completion_pattern),
+      errorPattern: compileRegex(options.provider.error_pattern ?? ""),
+      settleMs: this.settleMs,
+    });
+    this.buffer = new BoundedBuffer(
+      options.provider.max_output_bytes ?? DEFAULT_MAX_OUTPUT_BYTES,
+    );
   }
 
   async start(): Promise<void> {
@@ -124,7 +148,7 @@ export class PtySession extends EventEmitter {
     }
 
     this.timeoutTimer = setTimeout(() => {
-      this.requestFinish("timeout-fallback", true);
+      this.requestFinish("timeout-fallback", true, null);
     }, this.completionTimeoutMs);
 
     this.scheduleIdleCheck();
@@ -149,22 +173,31 @@ export class PtySession extends EventEmitter {
       return;
     }
     this.killed = true;
-    this.requestFinish("killed", true);
+    this.requestFinish("killed", true, null);
   }
 
   private handleData(chunk: string): void {
     if (this.completed) {
       return;
     }
-    this.rawOutput += chunk;
+    this.buffer.append(chunk);
     this.lastOutputAt = Date.now();
     this.emit("data", chunk);
-    if (
-      !this.pending &&
-      this.completionPattern &&
-      this.completionPattern.test(stripAnsi(this.rawOutput))
-    ) {
-      this.requestFinish("completion-pattern", false);
+
+    if (this.pending) {
+      return;
+    }
+
+    const detection = this.detector.push(chunk);
+    this.lastDetection = detection;
+
+    if (detection?.kind === "error") {
+      this.requestFinish("provider-error", false, classifyError(this.provider, chunk));
+      return;
+    }
+
+    if (detection?.kind === "completion") {
+      this.scheduleSettleCheck();
     }
   }
 
@@ -173,23 +206,59 @@ export class PtySession extends EventEmitter {
       return;
     }
     if (this.pending) {
-      this.finalize(this.pending.reason, exitCode ?? signal ?? null, this.pending.timedOut);
+      this.finalize(
+        this.pending.reason,
+        exitCode ?? signal ?? null,
+        this.pending.timedOut,
+        this.pending.errorClass,
+      );
       return;
     }
-    const reason: CompletionReason = this.killed ? "killed" : "process-exit";
-    this.finalize(reason, exitCode ?? signal ?? null, this.killed);
+    let reason: CompletionReason;
+    if (this.killed) {
+      reason = "killed";
+    } else if (this.lastDetection?.kind === "completion") {
+      // Pattern matched before the process exited cleanly — preserve that
+      // semantic rather than reporting a bare "process-exit".
+      reason = "completion-pattern";
+    } else {
+      reason = "process-exit";
+    }
+    this.finalize(reason, exitCode ?? signal ?? null, this.killed, null);
   }
 
-  private requestFinish(reason: CompletionReason, timedOut: boolean): void {
+  private scheduleSettleCheck(): void {
+    if (this.settleTimer) {
+      clearTimeout(this.settleTimer);
+    }
+    this.settleTimer = setTimeout(() => {
+      if (this.completed || this.pending) {
+        return;
+      }
+      if (this.detector.isSettled(this.lastOutputAt)) {
+        this.requestFinish("completion-pattern", false, null);
+      } else if (this.lastDetection?.kind === "completion") {
+        // Pattern still considered matched but settle not reached — re-arm.
+        this.scheduleSettleCheck();
+      }
+    }, Math.max(POLL_INTERVAL_MS, this.settleMs));
+  }
+
+  private requestFinish(
+    reason: CompletionReason,
+    timedOut: boolean,
+    errorClass: ErrorClass,
+  ): void {
     if (this.completed || this.pending) {
       return;
     }
     this.pending = {
       reason,
       timedOut,
+      errorClass,
       graceTimer: setTimeout(() => {
         if (!this.completed) {
-          this.finalize(reason, null, timedOut);
+          this.finalize(reason, null, timedOut, errorClass);
         }
       }, EXIT_GRACE_MS),
     };
@@ -210,8 +279,8 @@ export class PtySession extends EventEmitter {
           return;
         }
         const elapsedIdle = Date.now() - this.lastOutputAt;
-        if (this.rawOutput.length > 0 && elapsedIdle >= this.idleTimeoutMs) {
-          this.requestFinish("idle-timeout-fallback", true);
+        if (this.buffer.byteLength > 0 && elapsedIdle >= this.idleTimeoutMs) {
+          this.requestFinish("idle-timeout-fallback", true, null);
           return;
         }
         this.scheduleIdleCheck();
@@ -224,6 +293,7 @@ export class PtySession extends EventEmitter {
     reason: CompletionReason,
     exitCode: number | null,
     timedOut: boolean,
+    errorClass: ErrorClass,
   ): void {
     if (this.completed) {
       return;
@@ -238,18 +308,24 @@ export class PtySession extends EventEmitter {
       clearTimeout(this.idleTimer);
       this.idleTimer = null;
     }
+    if (this.settleTimer) {
+      clearTimeout(this.settleTimer);
+      this.settleTimer = null;
+    }
     if (this.pending?.graceTimer) {
       clearTimeout(this.pending.graceTimer);
     }
     this.pending = null;
 
-    const cleanedResult = cleanForDisplay(this.rawOutput).trim();
+    const cleanedResult = cleanForDisplay(this.buffer.toString()).trim();
     const outcome: PtyOutcome = {
       nodeId: this.nodeId,
       result: cleanedResult,
       completionReason: reason,
       exitCode,
       timedOut,
+      truncated: this.buffer.wasTruncated,
+      errorClass,
     };
 
     void this.materializedPrompt?.cleanup();
@@ -257,6 +333,22 @@ export class PtySession extends EventEmitter {
   }
 }
 
+function classifyError(provider: ProviderConfig, chunk: string): ErrorClass {
+  const haystack = chunk.toLowerCase();
+  if (
+    /rate.?limit|429|too many requests|usage limit|quota/.test(haystack) ||
+    /rate.?limit|429|too many requests|usage limit|quota/.test(
+      provider.error_pattern?.toLowerCase() ?? "",
+    )
+  ) {
+    return "rate-limit";
+  }
+  return "provider-error";
+}
+
 export function isSuccessfulOutcome(outcome: PtyOutcome): boolean {
+  if (outcome.errorClass) {
+    return false;
+  }
   return !outcome.timedOut && (outcome.exitCode === null || outcome.exitCode === 0);
 }

@@ -83,12 +83,23 @@ export function usePlanExecution() {
         emitTerminalChunk(event.payload.node_id, event.payload.chunk);
       }),
       listen<PtyCompletePayload>("pty:complete", (event) => {
-        const { node_id, exit_code, completion_reason, timed_out } = event.payload;
+        const {
+          node_id,
+          exit_code,
+          completion_reason,
+          timed_out,
+          truncated,
+          error_class,
+        } = event.payload;
+        const failed =
+          timed_out || (exit_code !== null && exit_code !== 0) || Boolean(error_class);
         setStatus(node_id, {
-          status: timed_out ? "error" : "complete",
+          status: failed ? "error" : "complete",
           exitCode: exit_code,
           completionReason: completion_reason,
           completedAt: Date.now(),
+          truncated: Boolean(truncated),
+          errorClass: error_class ?? null,
         });
         removeActive(node_id);
       }),

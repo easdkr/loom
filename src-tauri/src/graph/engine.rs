@@ -302,8 +302,13 @@ fn run_pty_node(
         Ok(outcome.result)
     } else {
         Err(format!(
-            "node {} failed: reason={}, exit={:?}, timed_out={}",
-            outcome.node_id, outcome.completion_reason, outcome.exit_code, outcome.timed_out
+            "node {} failed: reason={}, exit={:?}, timed_out={}, error_class={:?}, truncated={}",
+            outcome.node_id,
+            outcome.completion_reason,
+            outcome.exit_code,
+            outcome.timed_out,
+            outcome.error_class,
+            outcome.truncated,
         ))
     }
 }
@@ -358,6 +363,8 @@ fn emit_synthetic_outputs(app: &AppHandle, node_id: &str, body: &str) {
             completion_reason: "synthetic".to_string(),
             exit_code: Some(0),
             timed_out: false,
+            truncated: false,
+            error_class: None,
         },
     );
 }
