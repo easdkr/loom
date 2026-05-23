@@ -1,6 +1,6 @@
 # Loom — 제품 기획서
 
-> 버전 0.4 · 작성일 2026-05-23
+> 버전 0.5 · 작성일 2026-05-23
 
 ---
 
@@ -19,6 +19,8 @@
 11. [디자인 시스템](#11-디자인-시스템)
 12. [구현 로드맵](#12-구현-로드맵)
 13. [미결 사항 및 리스크](#13-미결-사항-및-리스크)
+
+> Phase 6의 멀티 프로젝트 워크스페이스 상세 설계는 [`docs/multi-project-workspace.md`](multi-project-workspace.md) 참고.
 
 ---
 
@@ -156,7 +158,31 @@ interface TaskContext {
 
 `ResultCollector` 노드는 여러 `TaskContext`를 병합해 다음 노드(리뷰어 등)에 단일 컨텍스트로 전달한다.
 
-### 3.4 PtyProvider 인터페이스
+### 3.4 Project (멀티 워크스페이스, Phase 6)
+
+Loom은 여러 프로젝트(=루트 디렉토리)를 탭으로 동시에 다룬다. 한 프로세스 안에서 그래프·실행 상태는 프로젝트별로 격리되며, 백그라운드 탭의 PTY는 활성 탭 전환 후에도 계속 돈다.
+
+```typescript
+interface Project {
+  id: string                  // ULID — 디렉토리 이동 후에도 동일하게 유지
+  root: string                // realpath() 처리된 절대 경로
+  name: string                // 기본 basename(root)
+  providersOverride?: string  // 프로젝트별 providers.toml (선택)
+  lastOpenedAt: number
+}
+```
+
+핵심 결정:
+
+- **디렉토리는 입력이 아니라 픽한다.** 모든 root와 노드 workdir은 OS 디렉토리 다이얼로그로 선택한다.
+- 그래프·실행 상태 store는 `Map<projectId, StoreApi>`로 프로젝트별 인스턴스화한다 (dump/restore가 아닌 인스턴스 분리).
+- 노드 ID는 Tauri 경계를 넘을 때만 `<projectId>:<localId>`로 prefix를 붙여 PTY 충돌을 막는다 — Rust는 opaque key로 통과시킨다.
+- 탭 순서는 사용자가 DnD로 조정하는 수동 순서이며, MRU 자동정렬은 하지 않는다.
+- 백그라운드 탭의 실행 상태는 탭 좌측 status dot으로 표시하되, 완료 시 자동 활성 전환은 하지 않는다.
+
+상세 데이터 모델·스토리지 마이그레이션·PR 분할은 [`docs/multi-project-workspace.md`](multi-project-workspace.md).
+
+### 3.5 PtyProvider 인터페이스
 
 PTY 워커 노드가 참조하는 CLI 연결 어댑터.
 
@@ -652,20 +678,24 @@ ExecutionPlan {
   4. ResultCollector 노드: 여러 입력 대기 후 병합
 ```
 
-### 9.4 플러그인 레지스트리
+### 9.4 디스크 레이아웃 (Phase 6 이후)
 
 ```
 ~/.loom/
-  providers.toml          ← CLI Provider 설정
+  providers.toml          ← 기본 Provider 설정
   plugins/
     my-provider.ts        ← 커스텀 Provider 플러그인
     my-node-type.ts       ← 커스텀 NodeType 플러그인
   templates/
-    review-pipeline.json  ← 저장된 그래프 템플릿
-  workspace.json          ← 마지막 그래프 상태
+    review-pipeline.json  ← 저장된 그래프 템플릿 (프로젝트 간 공유)
+  workspace.json          ← v2 글로벌 레지스트리: { projects, openTabs, activeTabId }
+
+<project-root>/.loom/
+  graph.json              ← 해당 프로젝트의 그래프(노드·엣지) 스냅샷
 ```
 
-앱 시작 시 `~/.loom/plugins/`를 스캔해 esbuild로 번들링 후 동적 로드.
+- 글로벌 `~/.loom/workspace.json`은 v1(단일 그래프 직접 저장)에서 v2(레지스트리만 저장)로 마이그레이션된다. v1 본문은 `workspace.v1.bak.json`으로 백업하고, 첫 실행 시 사용자가 root를 픽하면 해당 root의 `.loom/graph.json`으로 이식한다.
+- 앱 시작 시 `~/.loom/plugins/`를 스캔해 esbuild로 번들링 후 동적 로드.
 
 ---
 
@@ -718,6 +748,19 @@ ExecutionPlan {
 - ✓ 문서: [`docs/PROVIDERS.md`](PROVIDERS.md), [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
 - ◔ Rate limit retry/backoff — 자동 재시도는 의도적 보류 (사용자가 다음 행동 결정)
 - ✗ Windows ConPTY 경로 검증
+
+### Phase 6 — 멀티 프로젝트 워크스페이스 (3주)
+- v2 `~/.loom/workspace.json` 레지스트리 + 프로젝트별 `<root>/.loom/graph.json`
+- 글로벌 싱글톤 store → `Map<projectId, StoreApi>` factory 패턴
+- 노드 ID `<projectId>:<localId>` 네임스페이싱 (Rust 변경 없음)
+- 상단 탭 바: DnD 정렬, ⌘1~⌘9 / ⌘T / ⌘W 단축키, 우클릭 컨텍스트 메뉴
+- 빈 상태 화면 + 디렉토리 픽 온보딩 (텍스트 입력 없음)
+- workdir Browse 버튼, 상태바 프로젝트 표시, 백그라운드 status dot
+- 실행 중 탭 닫기 confirm 모달 — 활성 PTY 중단 후 닫기
+- TUI `--project / --project-root` 플래그 + `LOOM_PROJECT*` 환경변수
+- 의존성: `tauri-plugin-dialog`, capabilities 갱신
+
+상세 PR 분할(6.1 ~ 6.5)과 데이터 모델은 [`docs/multi-project-workspace.md`](multi-project-workspace.md).
 
 ---
 
