@@ -30,6 +30,9 @@
   --radius-lg: 8px;
   --radius-xl: 12px;
 
+  /* Borders */
+  --border-width-default: 1px;
+
   /* Node geometry */
   --node-width-min: 240px;
   --node-width-default: 280px;
