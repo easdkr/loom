@@ -5,6 +5,7 @@ import { useSettingsStore, type LoomMode } from "@stores/index";
 import SingleMode from "@modes/SingleMode";
 import PlanMode from "@modes/PlanMode";
 import AutoMode from "@modes/AutoMode";
+import HumanReviewModal from "@modes/plan/HumanReviewModal";
 
 const MODE_ITEMS: { id: LoomMode; label: string }[] = [
   { id: "single", label: "Single" },
@@ -27,6 +28,7 @@ function App() {
         {mode === "plan" && <PlanMode />}
         {mode === "auto" && <AutoMode />}
       </div>
+      <HumanReviewModal />
     </div>
   );
 }

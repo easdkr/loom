@@ -88,6 +88,26 @@
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.3);
 }
 
+.plan-review-sheet--popover {
+  width: min(360px, 90vw);
+  height: auto;
+  max-height: 70vh;
+  margin: auto;
+  border: var(--border-width-default) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  align-self: center;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+}
+
+.plan-review-sheet--human {
+  width: min(720px, 92vw);
+}
+
+.plan-review-backdrop:has(.plan-review-sheet--popover) {
+  justify-content: center;
+  align-items: center;
+}
+
 .plan-review-header {
   display: flex;
   align-items: center;

@@ -6,6 +6,8 @@ interface ShortcutHandlers {
   onRun: () => Promise<void> | void;
   onSave: () => Promise<void> | void;
   onLoad: () => Promise<void> | void;
+  onReplaceProvider?: (nodeId: string) => void;
+  onOpenTemplates?: () => void;
 }
 
 function isTextEditingElement(target: EventTarget | null): boolean {
@@ -69,6 +71,18 @@ export function usePlanShortcuts(handlers: ShortcutHandlers) {
       if (event.key.toLowerCase() === "s" && selected) {
         event.preventDefault();
         state.updateNode(selected.id, { skipped: !selected.skipped });
+        return;
+      }
+
+      if (event.key.toLowerCase() === "r" && selected && handlers.onReplaceProvider) {
+        event.preventDefault();
+        handlers.onReplaceProvider(selected.id);
+        return;
+      }
+
+      if (event.key.toLowerCase() === "t" && handlers.onOpenTemplates) {
+        event.preventDefault();
+        handlers.onOpenTemplates();
       }
     }
 

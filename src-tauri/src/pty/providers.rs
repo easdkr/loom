@@ -114,11 +114,18 @@ fn default_idle_timeout_ms() -> u64 {
 }
 
 pub fn providers_config_path() -> PathBuf {
+    loom_home().join("providers.toml")
+}
+
+pub fn provider_plugins_dir() -> PathBuf {
+    loom_home().join("plugins").join("providers")
+}
+
+fn loom_home() -> PathBuf {
     env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".loom")
-        .join("providers.toml")
 }
 
 pub fn default_provider_configs() -> Result<Vec<ProviderConfig>, String> {
@@ -127,8 +134,12 @@ pub fn default_provider_configs() -> Result<Vec<ProviderConfig>, String> {
 
 pub fn load_provider_configs() -> Result<Vec<ProviderConfig>, String> {
     let mut providers = default_provider_configs()?;
-    let path = providers_config_path();
 
+    for plugin in load_plugin_providers()? {
+        merge_provider(&mut providers, plugin);
+    }
+
+    let path = providers_config_path();
     if !path.exists() {
         return Ok(providers);
     }
@@ -140,17 +151,44 @@ pub fn load_provider_configs() -> Result<Vec<ProviderConfig>, String> {
         .providers;
 
     for provider in user_providers {
-        if let Some(index) = providers
-            .iter()
-            .position(|existing| existing.name == provider.name)
-        {
-            providers[index] = provider;
-        } else {
-            providers.push(provider);
-        }
+        merge_provider(&mut providers, provider);
     }
 
     Ok(providers)
+}
+
+fn merge_provider(providers: &mut Vec<ProviderConfig>, provider: ProviderConfig) {
+    if let Some(index) = providers
+        .iter()
+        .position(|existing| existing.name == provider.name)
+    {
+        providers[index] = provider;
+    } else {
+        providers.push(provider);
+    }
+}
+
+fn load_plugin_providers() -> Result<Vec<ProviderConfig>, String> {
+    let dir = provider_plugins_dir();
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut collected = Vec::new();
+    let entries = fs::read_dir(&dir)
+        .map_err(|error| format!("failed to read {}: {error}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("plugin entry read failed: {error}"))?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
+            continue;
+        }
+        let raw = fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        let file = parse_provider_toml(&raw)
+            .map_err(|error| format!("failed to parse {}: {error}", path.display()))?;
+        collected.extend(file.providers);
+    }
+    Ok(collected)
 }
 
 pub fn find_provider(provider_name: &str) -> Result<ProviderConfig, String> {

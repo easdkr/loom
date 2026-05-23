@@ -42,6 +42,17 @@ export const PALETTE: PaletteEntry[] = [
     defaultPrompt: "여러 입력의 결과를 병합합니다.",
   },
   {
+    type: "orchestrator:pipeline",
+    meta: {
+      name: "Pipeline Sync",
+      category: "orchestrator",
+      colorToken: "node/orchestrator",
+      icon: "git-pull-request",
+    },
+    defaultProvider: "shell",
+    defaultPrompt: "상위 노드들을 모두 기다린 뒤 후속 노드를 진행시킵니다.",
+  },
+  {
     type: "reviewer:llm",
     meta: {
       name: "LLM Reviewer",

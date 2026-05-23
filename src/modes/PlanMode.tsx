@@ -6,6 +6,8 @@ import NodePalette from "./plan/NodePalette";
 import Inspector from "./plan/Inspector";
 import ExecutionDrawer from "./plan/ExecutionDrawer";
 import PlanReview from "./plan/PlanReview";
+import TemplatesPanel from "./plan/TemplatesPanel";
+import ProviderSwapPopover from "./plan/ProviderSwapPopover";
 import { usePlanExecution } from "./plan/usePlanExecution";
 import { usePlanShortcuts } from "./plan/useShortcuts";
 import { loadWorkspace, saveWorkspace } from "./plan/workspace";
@@ -21,6 +23,8 @@ function PlanMode() {
   const { runPlan, cancelNode } = usePlanExecution();
   const [message, setMessage] = useState("Ready");
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [swapNodeId, setSwapNodeId] = useState<string | null>(null);
 
   const handleRun = useCallback(async () => {
     try {
@@ -50,7 +54,21 @@ function PlanMode() {
     }
   }, []);
 
-  usePlanShortcuts({ onRun: handleRun, onSave: handleSave, onLoad: handleLoad });
+  const handleReplaceProvider = useCallback((nodeId: string) => {
+    setSwapNodeId(nodeId);
+  }, []);
+
+  const handleOpenTemplates = useCallback(() => {
+    setTemplatesOpen(true);
+  }, []);
+
+  usePlanShortcuts({
+    onRun: handleRun,
+    onSave: handleSave,
+    onLoad: handleLoad,
+    onReplaceProvider: handleReplaceProvider,
+    onOpenTemplates: handleOpenTemplates,
+  });
 
   const running = activeNodeIds.length > 0;
 
@@ -74,6 +92,9 @@ function PlanMode() {
         title="Graph"
         actions={
           <div className="plan-canvas-actions">
+            <Button size="sm" variant="ghost" onClick={() => setTemplatesOpen(true)}>
+              Templates
+            </Button>
             <Button size="sm" variant="ghost" onClick={handleLoad}>
               Load
             </Button>
@@ -142,6 +163,19 @@ function PlanMode() {
           setReviewOpen(false);
           void handleRun();
         }}
+      />
+
+      <TemplatesPanel
+        open={templatesOpen}
+        saveDisabled={nodeCount === 0}
+        onClose={() => setTemplatesOpen(false)}
+        onApplied={(name) => setMessage(`Template loaded: ${name}`)}
+      />
+
+      <ProviderSwapPopover
+        open={swapNodeId !== null}
+        nodeId={swapNodeId}
+        onClose={() => setSwapNodeId(null)}
       />
     </section>
   );

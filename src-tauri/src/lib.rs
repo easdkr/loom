@@ -1,5 +1,7 @@
 mod graph;
 mod pty;
+mod review;
+mod templates;
 mod workspace;
 
 use graph::{engine::execute_plan_background, types::ExecutionPlan};
@@ -7,13 +9,19 @@ use pty::{
     manager::{PtyManager, PtyTask},
     providers::{find_provider, load_provider_configs, providers_config_path, ProviderConfig},
 };
+use review::{HumanReviewDecision, HumanReviewRegistry};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+use templates::{
+    delete_template, list_templates, load_template, save_template, TemplatePayload,
+    TemplatesResponse,
+};
 use workspace::{load_workspace, save_workspace, workspace_path};
 
 #[derive(Clone, Default)]
 struct LoomState {
     pty_manager: PtyManager,
+    review_registry: HumanReviewRegistry,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,6 +65,43 @@ struct WorkspaceLoadResponse {
     payload: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct NodeApproveRequest {
+    node_id: String,
+    note: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct NodeRejectRequest {
+    node_id: String,
+    reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TemplateSaveRequest {
+    name: String,
+    display_name: String,
+    description: Option<String>,
+    payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TemplateSaveResponse {
+    name: String,
+    path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TemplateRequest {
+    name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TemplateLoadResponse {
+    name: String,
+    payload: String,
+}
+
 #[tauri::command]
 fn list_providers() -> Result<ProvidersResponse, String> {
     Ok(ProvidersResponse {
@@ -82,7 +127,13 @@ fn graph_execute(
     request: GraphExecuteRequest,
 ) -> Result<String, String> {
     let run_id = request.run_id.unwrap_or_else(generate_run_id);
-    execute_plan_background(app, state.pty_manager.clone(), run_id.clone(), request.plan);
+    execute_plan_background(
+        app,
+        state.pty_manager.clone(),
+        state.review_registry.clone(),
+        run_id.clone(),
+        request.plan,
+    );
 
     Ok(run_id)
 }
@@ -108,6 +159,30 @@ fn node_resize(
 }
 
 #[tauri::command]
+fn node_approve(
+    state: tauri::State<'_, LoomState>,
+    request: NodeApproveRequest,
+) -> Result<(), String> {
+    state.review_registry.resolve(
+        &request.node_id,
+        HumanReviewDecision::Approve { note: request.note },
+    )
+}
+
+#[tauri::command]
+fn node_reject(
+    state: tauri::State<'_, LoomState>,
+    request: NodeRejectRequest,
+) -> Result<(), String> {
+    state.review_registry.resolve(
+        &request.node_id,
+        HumanReviewDecision::Reject {
+            reason: request.reason.unwrap_or_else(|| "rejected".to_string()),
+        },
+    )
+}
+
+#[tauri::command]
 fn workspace_save(request: WorkspaceSaveRequest) -> Result<String, String> {
     save_workspace(&request.payload).map(|path| path.display().to_string())
 }
@@ -119,6 +194,39 @@ fn workspace_load() -> Result<WorkspaceLoadResponse, String> {
         path: workspace_path().display().to_string(),
         payload,
     })
+}
+
+#[tauri::command]
+fn list_templates_command() -> Result<TemplatesResponse, String> {
+    list_templates()
+}
+
+#[tauri::command]
+fn load_template_command(request: TemplateRequest) -> Result<TemplateLoadResponse, String> {
+    let payload = load_template(&request.name)?;
+    Ok(TemplateLoadResponse {
+        name: request.name,
+        payload,
+    })
+}
+
+#[tauri::command]
+fn save_template_command(request: TemplateSaveRequest) -> Result<TemplateSaveResponse, String> {
+    let payload = TemplatePayload {
+        display_name: request.display_name,
+        description: request.description.unwrap_or_default(),
+        payload: request.payload,
+    };
+    let path = save_template(&request.name, payload)?;
+    Ok(TemplateSaveResponse {
+        name: request.name,
+        path: path.display().to_string(),
+    })
+}
+
+#[tauri::command]
+fn delete_template_command(request: TemplateRequest) -> Result<(), String> {
+    delete_template(&request.name)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -133,8 +241,14 @@ pub fn run() {
             node_write,
             node_resize,
             node_kill,
+            node_approve,
+            node_reject,
             workspace_save,
-            workspace_load
+            workspace_load,
+            list_templates_command,
+            load_template_command,
+            save_template_command,
+            delete_template_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
