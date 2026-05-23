@@ -1,0 +1,319 @@
+/* Plan mode-specific styles */
+
+.plan-palette {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.plan-palette-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+}
+
+.plan-palette-name {
+  color: var(--fg-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  font-weight: var(--weight-medium);
+}
+
+.plan-palette-type {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+.plan-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.plan-inspector-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.plan-inspector-name {
+  color: var(--fg-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  font-weight: var(--weight-medium);
+}
+
+.plan-inspector-empty {
+  padding: var(--space-3);
+  color: var(--fg-tertiary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.plan-inspector-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.plan-canvas-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Plan Review sheet ----------------------------------------- */
+.plan-review-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.plan-review-sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(640px, 90vw);
+  height: 100%;
+  background: var(--bg-surface);
+  border-left: var(--border-width-default) solid var(--border-subtle);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.3);
+}
+
+.plan-review-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--border-width-default) solid var(--border-subtle);
+}
+
+.plan-review-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: var(--weight-medium);
+}
+
+.plan-review-stats {
+  color: var(--fg-tertiary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.plan-review-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow: auto;
+}
+
+.plan-review-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-width-default) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.plan-review-item[data-skipped="true"] {
+  opacity: 0.6;
+}
+
+.plan-review-item-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.plan-review-step {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-weight: var(--weight-medium);
+}
+
+.plan-review-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.plan-review-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.plan-review-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.plan-review-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: var(--border-width-default) solid var(--border-subtle);
+}
+
+/* Execution drawer ------------------------------------------- */
+.plan-canvas-stack {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+}
+
+.plan-canvas-graph {
+  min-height: 0;
+  position: relative;
+}
+
+.plan-drawer {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 280px;
+  border-top: var(--border-width-default) solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.plan-drawer-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: var(--border-width-default) solid var(--border-subtle);
+  overflow-x: auto;
+}
+
+.plan-drawer-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--space-6);
+  padding: 0 var(--space-2);
+  border: var(--border-width-default) solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  cursor: default;
+}
+
+.plan-drawer-tab:hover {
+  background: var(--bg-elevated);
+  color: var(--fg-primary);
+}
+
+.plan-drawer-tab[data-active="true"] {
+  border-color: var(--border-default);
+  background: var(--bg-elevated);
+  color: var(--fg-primary);
+}
+
+.plan-drawer-tab-label {
+  font-weight: var(--weight-medium);
+}
+
+.plan-drawer-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.plan-drawer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-bottom: var(--border-width-default) solid var(--border-subtle);
+}
+
+.plan-drawer-meta {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+/* ReactFlow theme overrides ---------------------------------- */
+.react-flow {
+  background: var(--bg-canvas);
+}
+
+.react-flow__controls {
+  background: var(--bg-surface);
+  border: var(--border-width-default) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  background: var(--bg-surface);
+  border-bottom: var(--border-width-default) solid var(--border-subtle);
+  color: var(--fg-secondary);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--bg-elevated);
+  color: var(--fg-primary);
+}
+
+.react-flow__minimap {
+  background: var(--bg-surface);
+  border: var(--border-width-default) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.react-flow__edge-path {
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:focus .react-flow__edge-path {
+  stroke: var(--accent-default);
+}
+
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+}
+
+.react-flow__handle:hover {
+  background: var(--accent-default);
+  border-color: var(--accent-default);
+}

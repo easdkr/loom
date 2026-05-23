@@ -1,0 +1,129 @@
+.auto-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
+  gap: var(--space-4);
+  height: 100%;
+  min-height: 0;
+}
+
+.auto-input {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.auto-template-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.auto-template-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--fg-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.auto-template-auto input[type="checkbox"] {
+  width: var(--space-4);
+  height: var(--space-4);
+}
+
+.auto-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.auto-detected {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--fg-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.auto-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+  border-left: var(--border-width-default) solid var(--border-subtle);
+  padding-left: var(--space-4);
+}
+
+.auto-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--fg-tertiary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.auto-reasoning {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.auto-node-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  overflow: auto;
+  min-height: 0;
+}
+
+.auto-node-list-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--border-width-default) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.auto-node-list-item header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.auto-node-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.auto-node-prompt {
+  margin: 0;
+  padding: var(--space-2);
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow: auto;
+}

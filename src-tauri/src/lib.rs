@@ -1,5 +1,6 @@
 mod graph;
 mod pty;
+mod workspace;
 
 use graph::{engine::execute_plan_background, types::ExecutionPlan};
 use pty::{
@@ -8,6 +9,7 @@ use pty::{
 };
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+use workspace::{load_workspace, save_workspace, workspace_path};
 
 #[derive(Clone, Default)]
 struct LoomState {
@@ -42,6 +44,17 @@ struct NodeResizeRequest {
     node_id: String,
     cols: u16,
     rows: u16,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorkspaceSaveRequest {
+    payload: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WorkspaceLoadResponse {
+    path: String,
+    payload: Option<String>,
 }
 
 #[tauri::command]
@@ -94,6 +107,20 @@ fn node_resize(
         .resize(&request.node_id, request.cols, request.rows)
 }
 
+#[tauri::command]
+fn workspace_save(request: WorkspaceSaveRequest) -> Result<String, String> {
+    save_workspace(&request.payload).map(|path| path.display().to_string())
+}
+
+#[tauri::command]
+fn workspace_load() -> Result<WorkspaceLoadResponse, String> {
+    let payload = load_workspace()?;
+    Ok(WorkspaceLoadResponse {
+        path: workspace_path().display().to_string(),
+        payload,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -105,7 +132,9 @@ pub fn run() {
             graph_execute,
             node_write,
             node_resize,
-            node_kill
+            node_kill,
+            workspace_save,
+            workspace_load
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

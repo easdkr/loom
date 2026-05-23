@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fallbackProviders } from "@providers";
+import { Button, Statusbar, StatusbarSpacer } from "@design/components";
+import { useGraphStore, useSettingsStore } from "@stores/index";
+import { findPaletteEntry } from "@modes/plan/node-catalog";
 import TerminalOutput, { type TerminalOutputHandle, type TerminalSize } from "./TerminalOutput";
 import type {
   ProviderConfig,
@@ -15,6 +18,9 @@ import type {
 type RunStatus = "idle" | "running" | "complete" | "error";
 
 function SingleMode() {
+  const setMode = useSettingsStore((state) => state.setMode);
+  const upsertNode = useGraphStore((state) => state.upsertNode);
+  const selectNode = useGraphStore((state) => state.selectNode);
   const [providers, setProviders] = useState<ProviderConfig[]>(fallbackProviders);
   const [configPath, setConfigPath] = useState("~/.loom/providers.toml");
   const [selectedProvider, setSelectedProvider] = useState("shell");
@@ -193,6 +199,29 @@ function SingleMode() {
     }
   }
 
+  function continueInPlan() {
+    if (!provider) {
+      return;
+    }
+    const entry = findPaletteEntry("worker:pty");
+    const nodeId = `single-${Date.now().toString(36)}`;
+    upsertNode({
+      id: nodeId,
+      type: "worker:pty",
+      meta: entry?.meta ?? {
+        name: "Single → Plan",
+        category: "worker",
+        colorToken: "node/worker",
+      },
+      provider: provider.name,
+      prompt,
+      workdir: workdir.trim() || null,
+      position: { x: 60, y: 60 },
+    });
+    selectNode(nodeId);
+    setMode("plan");
+  }
+
   async function resizeTerminal(size: TerminalSize) {
     terminalSizeRef.current = size;
     if (!activeNodeIdRef.current) {
@@ -216,15 +245,6 @@ function SingleMode() {
 
   return (
     <main className="loom-shell">
-      <header className="loom-topbar">
-        <div className="loom-brand">Loom</div>
-        <div className="loom-mode">Single</div>
-        <div className="loom-status" data-status={status}>
-          <span className="loom-status-dot" />
-          {message}
-        </div>
-      </header>
-
       <section className="single-layout">
         <aside className="single-sidebar" aria-label="Single mode controls">
           <label className="field">
@@ -273,6 +293,12 @@ function SingleMode() {
             </button>
           </div>
 
+          {(status === "complete" || status === "error") && prompt.trim() ? (
+            <Button variant="ghost" size="sm" onClick={continueInPlan}>
+              Continue in Plan →
+            </Button>
+          ) : null}
+
           <label className="field">
             <span>Stdin</span>
             <div className="inline-input">
@@ -301,6 +327,13 @@ function SingleMode() {
           />
         </section>
       </section>
+
+      <Statusbar className="mode-statusbar" data-status={status}>
+        <span className="loom-status-dot" />
+        <span>{message}</span>
+        <StatusbarSpacer />
+        <span>{provider?.name ?? "—"}</span>
+      </Statusbar>
     </main>
   );
 }

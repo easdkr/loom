@@ -17,9 +17,13 @@
     "paths": {
       "@/*": ["src/*"],
       "@core": ["src/core"],
+      "@core/*": ["src/core/*"],
       "@providers": ["src/providers"],
+      "@providers/*": ["src/providers/*"],
       "@design": ["src/design"],
+      "@design/*": ["src/design/*"],
       "@modes/*": ["src/modes/*"],
+      "@stores": ["src/stores"],
       "@stores/*": ["src/stores/*"]
     },
 

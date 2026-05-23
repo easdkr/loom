@@ -1,54 +1,47 @@
-.loom-shell {
+.loom-app {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-rows: var(--node-header-height) minmax(0, 1fr);
+  grid-template-rows: calc(var(--space-12) - var(--space-2)) minmax(0, 1fr);
   overflow: hidden;
   background: var(--bg-canvas);
   color: var(--fg-primary);
   letter-spacing: 0;
 }
 
-.loom-topbar {
+.loom-app-topbar {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  min-width: 0;
+  gap: var(--space-4);
   padding-inline: var(--space-4);
   border-bottom: var(--border-width-default) solid var(--border-subtle);
   background: var(--bg-surface);
+}
+
+.loom-app-body {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.loom-app-body > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.loom-shell {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) var(--statusbar-height);
+  overflow: hidden;
 }
 
 .loom-brand {
   font-size: var(--text-lg);
   line-height: var(--leading-lg);
   font-weight: var(--weight-medium);
-}
-
-.loom-mode {
-  height: var(--space-5);
-  display: inline-flex;
-  align-items: center;
-  padding-inline: var(--space-2);
-  border: var(--border-width-default) solid var(--border-default);
-  border-radius: var(--radius-sm);
-  color: var(--accent-default);
-  font-size: var(--text-xs);
-  line-height: var(--leading-xs);
-}
-
-.loom-status {
-  min-width: 0;
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--fg-secondary);
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .loom-status-dot {
@@ -59,17 +52,80 @@
   background: var(--neutral-default);
 }
 
-.loom-status[data-status="running"] .loom-status-dot {
+.mode-statusbar[data-status="running"] .loom-status-dot {
   background: var(--accent-default);
   animation: pulse-running var(--motion-slow) var(--ease-in-out) infinite;
 }
 
-.loom-status[data-status="complete"] .loom-status-dot {
+.mode-statusbar[data-status="complete"] .loom-status-dot {
   background: var(--success-default);
 }
 
-.loom-status[data-status="error"] .loom-status-dot {
+.mode-statusbar[data-status="error"] .loom-status-dot {
   background: var(--danger-default);
+}
+
+/* Plan/Auto mode shared layout ----------------------------- */
+.mode-layout {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  overflow: hidden;
+}
+
+.mode-layout--plan {
+  grid-template-columns:
+    minmax(var(--panel-width-min), var(--panel-width-default))
+    minmax(0, 1fr)
+    minmax(var(--panel-width-min), var(--panel-width-default));
+  grid-template-rows: minmax(0, 1fr) var(--statusbar-height);
+  grid-template-areas:
+    "sidebar canvas inspector"
+    "statusbar statusbar statusbar";
+}
+
+.mode-layout--auto {
+  grid-template-rows: minmax(0, 1fr) var(--statusbar-height);
+  grid-template-areas:
+    "canvas"
+    "statusbar";
+}
+
+.mode-sidebar {
+  grid-area: sidebar;
+  border-right: var(--border-width-default) solid var(--border-subtle);
+}
+
+.mode-canvas {
+  grid-area: canvas;
+}
+
+.mode-canvas--full {
+  width: 100%;
+}
+
+.mode-inspector {
+  grid-area: inspector;
+  border-left: var(--border-width-default) solid var(--border-subtle);
+}
+
+.mode-statusbar {
+  grid-area: statusbar;
+}
+
+.mode-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--space-12);
+  color: var(--fg-tertiary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.mode-placeholder--canvas {
+  height: 100%;
+  background: var(--bg-canvas);
 }
 
 .single-layout {
