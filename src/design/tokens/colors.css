@@ -1,0 +1,86 @@
+/*
+ * Loom — color tokens
+ *
+ * 모든 색상은 여기에서만 정의한다. 컴포넌트에 raw hex 금지.
+ * 사용: bg-[var(--bg-canvas)], text-[var(--fg-primary)] 등.
+ *
+ * 다크 테마가 기본. 라이트는 보조 매핑.
+ * 자세한 근거는 docs/PRD.md §11.2 참고.
+ */
+
+:root,
+[data-theme="dark"] {
+  /* Background — 4 depth layers (warm gray) */
+  --bg-canvas: #0e0e10;
+  --bg-surface: #161618;
+  --bg-elevated: #1f1f23;
+  --bg-overlay: #2a2a30;
+
+  /* Foreground */
+  --fg-primary: #e8e8ec;
+  --fg-secondary: #a8a8b0;
+  --fg-tertiary: #6e6e78;
+  --fg-disabled: #3f3f45;
+
+  /* Border */
+  --border-subtle: #26262c;
+  --border-default: #34343c;
+  --border-strong: #4a4a54;
+
+  /* Accent — warm amber (loom thread color) */
+  --accent-default: #e8a852;
+  --accent-hover: #f0b868;
+  --accent-muted: #5c4622;
+
+  /* Semantic */
+  --success-default: #6fcf8e;
+  --success-muted: #2c4a35;
+  --warning-default: #e8b85c;
+  --warning-muted: #5a4422;
+  --danger-default: #e87878;
+  --danger-muted: #5a2a2a;
+  --info-default: #7ca8e0;
+  --info-muted: #2a3a55;
+  --neutral-default: #888894;
+
+  /* Node category stripes */
+  --node-orchestrator: #9f88e0;
+  --node-worker: #7cb8e0;
+  --node-collector: #88d0b8;
+  --node-reviewer: #e8b888;
+  --node-router: #b8b8b8;
+
+  /* Focus ring */
+  --focus-ring: #e8a852;
+
+  /* Terminal */
+  --terminal-bg: #0a0a0c;
+  --terminal-fg: #d4d4d8;
+  --terminal-cursor: #e8a852;
+  --terminal-selection: rgba(52, 52, 60, 0.4);
+}
+
+[data-theme="light"] {
+  --bg-canvas: #fafaf8;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f4f4f0;
+  --bg-overlay: #eaeae6;
+
+  --fg-primary: #1a1a1c;
+  --fg-secondary: #4a4a52;
+  --fg-tertiary: #7a7a82;
+  --fg-disabled: #b8b8c0;
+
+  --border-subtle: #e8e8e4;
+  --border-default: #d8d8d4;
+  --border-strong: #b8b8b4;
+
+  --accent-default: #c08020;
+  --accent-hover: #d09838;
+  --accent-muted: #f4e4c0;
+
+  --success-default: #3a9a5c;
+  --warning-default: #b8841c;
+  --danger-default: #c44848;
+  --info-default: #4878b8;
+}

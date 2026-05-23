@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+@import "../design/tokens/colors.css";
+@import "../design/tokens/typography.css";
+@import "../design/tokens/spacing.css";
+@import "../design/tokens/motion.css";
+
+/*
+ * Loom — global styles
+ * 토큰만 참조. raw 값 금지.
+ */
+
+:root {
+  color-scheme: dark;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-sans);
+
+  color: var(--fg-primary);
+  background-color: var(--bg-canvas);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background-color: var(--bg-canvas);
+  color: var(--fg-primary);
+}
+
+/* Focus ring — keyboard users 우선 */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: var(--accent-muted);
+  color: var(--fg-primary);
+}

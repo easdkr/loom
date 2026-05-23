@@ -1,0 +1,59 @@
+/*
+ * Loom — motion tokens
+ * 의미 없는 애니메이션 금지. 진행을 나타내는 것만 반복.
+ */
+
+:root {
+  --motion-instant: 100ms;
+  --motion-fast: 150ms;
+  --motion-normal: 250ms;
+  --motion-slow: 400ms;
+
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-instant: 0ms;
+    --motion-fast: 0ms;
+    --motion-normal: 0ms;
+    --motion-slow: 0ms;
+  }
+}
+
+@keyframes pulse-running {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(232, 168, 82, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(232, 168, 82, 0);
+  }
+}
+
+@keyframes pulse-info {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(124, 168, 224, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(124, 168, 224, 0);
+  }
+}
+
+@keyframes pulse-warning {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(232, 184, 92, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(232, 184, 92, 0);
+  }
+}
+
+@keyframes flow-edge {
+  to {
+    stroke-dashoffset: -12;
+  }
+}

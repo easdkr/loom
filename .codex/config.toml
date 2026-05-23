@@ -1,0 +1,42 @@
+# Codex CLI project config — Loom
+#
+# 이 파일은 Codex CLI가 이 저장소에서 작업할 때 참조한다.
+# 전체 컨텍스트는 ../AGENTS.md 에 있다.
+
+[project]
+name = "loom"
+description = "PTY-based local AI agent orchestrator"
+agents_md = "../AGENTS.md"
+prd = "../docs/PRD.md"
+
+[runtime]
+package_manager = "pnpm"
+node_version_min = "20"
+rust_edition = "2021"
+
+[commands]
+install = "pnpm install"
+dev = "pnpm tauri dev"
+build_frontend = "pnpm build"
+build_app = "pnpm tauri build"
+typecheck = "pnpm tsc --noEmit"
+rust_check = "cargo check --manifest-path src-tauri/Cargo.toml"
+rust_clippy = "cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings"
+rust_test = "cargo test --manifest-path src-tauri/Cargo.toml"
+
+[conventions]
+commit_style = "conventional"
+commit_subject_max = 70
+design_token_rule = "src/design/tokens/*.css 의 CSS variable만 사용. raw hex/px 금지."
+node_layout_rule = "헤더 28px + 본문 가변 + 푸터 24px + 좌측 4px 카테고리 스트라이프"
+pty_completion_rule = "정규식 + 타임아웃 fallback 항상 짝으로"
+
+[forbid]
+windows_specific_code_until_phase_5 = true
+external_service_dependency = true
+raw_design_values_in_components = true
+
+[focus_paths]
+core = ["src/core/**", "src-tauri/src/graph/**", "src-tauri/src/pty/**"]
+ui = ["src/design/**", "src/modes/**"]
+providers = ["src/providers/**"]

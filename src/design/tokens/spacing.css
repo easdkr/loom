@@ -1,0 +1,47 @@
+/*
+ * Loom — spacing tokens (4px base grid)
+ * 모든 간격은 4의 배수. 예외 없음.
+ */
+
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Container padding presets */
+  --panel-padding-x: 16px;
+  --panel-padding-y: 12px;
+  --card-padding: 12px;
+  --node-padding-x: 12px;
+  --node-padding-y: 10px;
+  --button-padding-x: 12px;
+  --button-padding-y: 6px;
+
+  /* Radii */
+  --radius-none: 0;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* Node geometry */
+  --node-width-min: 240px;
+  --node-width-default: 280px;
+  --node-width-max: 360px;
+  --node-height-min: 80px;
+  --node-header-height: 28px;
+  --node-footer-height: 24px;
+  --node-stripe-width: 4px;
+
+  /* Panel geometry */
+  --panel-width-default: 360px;
+  --panel-width-min: 280px;
+  --panel-width-max: 560px;
+  --statusbar-height: 28px;
+}
