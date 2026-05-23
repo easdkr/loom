@@ -27,10 +27,10 @@
   --border-default: #34343c;
   --border-strong: #4a4a54;
 
-  /* Accent — warm amber (loom thread color) */
-  --accent-default: #e8a852;
-  --accent-hover: #f0b868;
-  --accent-muted: #5c4622;
+  /* Accent — calm teal (loom thread color) */
+  --accent-default: #4ec9b0;
+  --accent-hover: #6fdcc4;
+  --accent-muted: #1f3a36;
 
   /* Semantic */
   --success-default: #6fcf8e;
@@ -43,20 +43,20 @@
   --info-muted: #2a3a55;
   --neutral-default: #888894;
 
-  /* Node category stripes */
-  --node-orchestrator: #9f88e0;
-  --node-worker: #7cb8e0;
-  --node-collector: #88d0b8;
-  --node-reviewer: #e8b888;
-  --node-router: #b8b8b8;
+  /* Node category stripes — desaturated, same lightness band */
+  --node-orchestrator: #8478a8;
+  --node-worker: #7898b8;
+  --node-collector: #7eaa98;
+  --node-reviewer: #b89884;
+  --node-router: #909098;
 
   /* Focus ring */
-  --focus-ring: #e8a852;
+  --focus-ring: #4ec9b0;
 
   /* Terminal */
   --terminal-bg: #0a0a0c;
   --terminal-fg: #d4d4d8;
-  --terminal-cursor: #e8a852;
+  --terminal-cursor: #4ec9b0;
   --terminal-selection: rgba(52, 52, 60, 0.4);
 }
 
@@ -75,9 +75,9 @@
   --border-default: #d8d8d4;
   --border-strong: #b8b8b4;
 
-  --accent-default: #c08020;
-  --accent-hover: #d09838;
-  --accent-muted: #f4e4c0;
+  --accent-default: #2a9d85;
+  --accent-hover: #1f7e69;
+  --accent-muted: #d4ece4;
 
   --success-default: #3a9a5c;
   --warning-default: #b8841c;

@@ -682,10 +682,10 @@ ExecutionPlan {
 ```
 배경       bg/canvas #0E0E10  bg/surface #161618  bg/elevated #1F1F23
 전경       fg/primary #E8E8EC  fg/secondary #A8A8B0  fg/tertiary #6E6E78
-액센트     accent/default #E8A852 (직조기의 실 색 — 따뜻한 호박색)
+액센트     accent/default #4EC9B0 (차분한 청록 — 다크 위에서 튀지 않는 실 색)
 의미       success #6FCF8E  warning #E8B85C  danger #E87878  info #7CA8E0
-노드 카테고리  orchestrator #9F88E0  worker #7CB8E0  collector #88D0B8
-              reviewer #E8B888  router #B8B8B8
+노드 카테고리  orchestrator #8478A8  worker #7898B8  collector #7EAA98
+              reviewer #B89884  router #909098
 타이포      sans (Inter)  mono (JetBrains Mono)  사이즈 11/12/13/14/16/20/24px
 간격        4px 베이스 그리드
 ```
