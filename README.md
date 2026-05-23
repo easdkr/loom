@@ -49,7 +49,26 @@ pnpm tauri dev       # 데스크톱 앱 개발 모드
 pnpm tauri build     # 프로덕션 번들 빌드
 pnpm dev             # 프론트엔드만 실행 (브라우저)
 pnpm build           # 프론트엔드 빌드
+pnpm loom <cmd>      # TUI 어댑터 (ink.js · Phase 2)
+pnpm tui:typecheck   # TUI 타입 체크
+pnpm tui:test        # TUI 단위/통합 테스트 (node-pty 포함)
 ```
+
+### TUI 어댑터 (Phase 2)
+
+`pnpm loom`은 ink.js 기반 헤드리스/CI 친화 TUI다. 데스크톱 UI 없이 동일한 PTY 코어로 단일 실행/Plan 리뷰를 수행한다.
+
+```bash
+pnpm loom providers                                # 등록된 Provider 목록
+pnpm loom init [--force]                           # ~/.loom/providers.toml 기본값 작성
+pnpm loom run "echo hi" --provider shell           # Single 모드 (단일 노드)
+pnpm loom run - --provider shell < prompt.txt      # stdin에서 프롬프트 읽기
+pnpm loom run @prompt.txt --provider shell         # 파일에서 프롬프트 읽기
+pnpm loom plan "OAuth 전환" --template default     # 3-step 템플릿으로 Plan Review
+pnpm loom plan "..." --template single --yes       # 리뷰 없이 즉시 실행
+```
+
+Plan Review 단축키: `↑/↓` 노드 이동, `e` 프롬프트 편집, `r` provider 토글, `s` 노드 건너뜀, `a` 노드 추가, `d` 노드 삭제, `[` / `]` 노드 순서 이동, `enter` 승인 및 실행, `esc` 취소.
 
 ## 디렉토리
 
@@ -84,7 +103,7 @@ loom/
 
 ## 상태
 
-🚧 **초기 기획 단계** — 0.1.0 스캐폴드. 코어 구현 전.
+🚧 **초기 구현 진행 중** — Phase 1 PTY 런타임과 Phase 2 TUI 어댑터까지 완료. Phase 3 Desktop GUI는 진행 전.
 
 ## 라이선스
 

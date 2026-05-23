@@ -36,6 +36,16 @@ src-tauri/src/
   plugin/        플러그인 레지스트리 (esbuild 런타임 로드)
   commands.rs    Tauri command 핸들러
   lib.rs         앱 진입점
+
+tui/               Phase 2 ink.js TUI 어댑터 (헤드리스/CI 친화)
+  bin/loom.ts      CLI 엔트리 (`pnpm loom`)
+  src/cli/         commander + ink 화면 (run / plan / providers / init)
+  src/components/  Banner, StatusBar, StreamPanel, PlanReview, PromptForm
+  src/pty/         node-pty 세션, multiplexer, ANSI/regex/prompt handoff
+  src/graph/       topology + PlanExecutor (Rust 엔진과 동일한 의미)
+  src/plan/        PlanDraft 스키마 + 휴리스틱 generatePlan
+  scripts/         postinstall 보조 (node-pty spawn-helper exec 비트 복구)
+  test/            node:test 기반 단위/통합 테스트
 ```
 
 ## 코드 작성 규칙
@@ -88,6 +98,14 @@ pnpm dev                     # 프론트만 (브라우저)
 pnpm build                   # 프론트 빌드
 pnpm tauri build             # 프로덕션 번들
 cargo check --manifest-path src-tauri/Cargo.toml   # Rust 타입 체크
+
+# TUI 어댑터 (Phase 2)
+pnpm loom providers          # Provider 목록
+pnpm loom init [--force]     # 기본 ~/.loom/providers.toml 작성
+pnpm loom run "<prompt>" --provider shell
+pnpm loom plan "<prompt>" --template default
+pnpm tui:typecheck
+pnpm tui:test                # node:test 기반, node-pty 실제 spawn 포함
 ```
 
 ## 모듈 추가 가이드

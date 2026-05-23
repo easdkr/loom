@@ -27,6 +27,8 @@ src/             React 프론트엔드
   stores/        Zustand
 src-tauri/src/   Rust 코어
   pty/  graph/  plugin/
+tui/             Phase 2 ink.js TUI 어댑터 (헤드리스/CI 친화)
+  bin/  src/cli/  src/components/  src/pty/  src/graph/  src/plan/  test/
 docs/            기획·디자인
 .claude/         Claude Code 설정
 .codex/          Codex 설정
@@ -50,6 +52,13 @@ pnpm tauri dev                                       # 데스크톱 앱 개발
 pnpm dev                                             # 프론트만 (브라우저)
 pnpm build && cargo check --manifest-path src-tauri/Cargo.toml
 pnpm tauri build                                     # 프로덕션 번들
+
+# TUI 어댑터 (Phase 2)
+pnpm loom providers
+pnpm loom init [--force]
+pnpm loom run "<prompt>" --provider shell
+pnpm loom plan "<prompt>" --template default
+pnpm tui:typecheck && pnpm tui:test
 ```
 
 ## 커밋 규칙
