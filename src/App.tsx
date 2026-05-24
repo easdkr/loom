@@ -20,7 +20,9 @@ function App() {
   return (
     <div className="loom-app">
       <header className="loom-app-topbar">
-        <div className="loom-brand">Loom</div>
+        <div className="loom-brand">
+          <img className="loom-brand-logo" src="/logo.png" alt="Loom" />
+        </div>
         <Toolbar items={MODE_ITEMS} value={mode} onChange={setMode} />
       </header>
       <div className="loom-app-body">
