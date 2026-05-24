@@ -39,9 +39,17 @@
 }
 
 .loom-brand {
-  font-size: var(--text-lg);
-  line-height: var(--leading-lg);
-  font-weight: var(--weight-medium);
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.loom-brand-logo {
+  display: block;
+  height: var(--space-8);
+  width: auto;
+  max-width: calc(var(--space-12) * 4);
+  border-radius: var(--radius-sm);
 }
 
 .loom-status-dot {
