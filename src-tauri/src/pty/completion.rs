@@ -70,9 +70,7 @@ impl CompletionDetector {
 
         if let Some(pattern) = &self.error_pattern {
             if pattern.is_match(&stripped) {
-                let matched_at = *self
-                    .error_matched_at
-                    .get_or_insert_with(Instant::now);
+                let matched_at = *self.error_matched_at.get_or_insert_with(Instant::now);
                 return Some(Detection {
                     kind: DetectionKind::Error,
                     matched_at,
@@ -82,9 +80,7 @@ impl CompletionDetector {
 
         if let Some(pattern) = &self.completion_pattern {
             if pattern.is_match(&stripped) {
-                let matched_at = *self
-                    .completion_matched_at
-                    .get_or_insert_with(Instant::now);
+                let matched_at = *self.completion_matched_at.get_or_insert_with(Instant::now);
                 return Some(Detection {
                     kind: DetectionKind::Completion,
                     matched_at,
@@ -225,12 +221,8 @@ mod tests {
 
     #[test]
     fn settle_requires_quiet_window() {
-        let mut detector = CompletionDetector::new(
-            Some(Regex::new(r"Done").unwrap()),
-            None,
-            50,
-            4096,
-        );
+        let mut detector =
+            CompletionDetector::new(Some(Regex::new(r"Done").unwrap()), None, 50, 4096);
         let detection = detector.push("Done\n").unwrap();
         let matched_at = detection.matched_at;
         assert!(!detector.is_settled(matched_at));
@@ -240,12 +232,8 @@ mod tests {
 
     #[test]
     fn tail_eviction_resets_completion() {
-        let mut detector = CompletionDetector::new(
-            Some(Regex::new(r"Done").unwrap()),
-            None,
-            50,
-            1024,
-        );
+        let mut detector =
+            CompletionDetector::new(Some(Regex::new(r"Done").unwrap()), None, 50, 1024);
         let first = detector.push("Done\n").unwrap();
         let payload = "x".repeat(4096);
         let after = detector.push(&payload);

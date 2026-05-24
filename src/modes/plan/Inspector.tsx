@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   Badge,
   Button,
@@ -9,6 +10,7 @@ import {
   Textarea,
 } from "@design/components";
 import { useGraphStore } from "@stores/index";
+import { useWorkspaceStore } from "@stores/index";
 import { fallbackProviders, type ProviderConfig, type ProvidersResponse } from "@providers";
 
 function Inspector() {
@@ -16,12 +18,20 @@ function Inspector() {
   const node = useGraphStore((state) => state.nodes.find((n) => n.id === state.selectedNodeId));
   const updateNode = useGraphStore((state) => state.updateNode);
   const removeNode = useGraphStore((state) => state.removeNode);
+  const activeProjectId = useWorkspaceStore((state) => state.activeTabId);
+  const activeProject = useWorkspaceStore((state) =>
+    state.projects.find((project) => project.id === activeProjectId),
+  );
 
   const [providers, setProviders] = useState<ProviderConfig[]>(fallbackProviders);
 
   useEffect(() => {
     let cancelled = false;
-    invoke<ProvidersResponse>("list_providers")
+    invoke<ProvidersResponse>("list_providers", {
+      request: activeProject?.providersOverride
+        ? { override_path: activeProject.providersOverride }
+        : null,
+    })
       .then((response) => {
         if (!cancelled) {
           setProviders(response.providers);
@@ -33,7 +43,22 @@ function Inspector() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [activeProject?.providersOverride]);
+
+  async function browseWorkdir() {
+    if (!node) {
+      return;
+    }
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: activeProject?.root,
+      title: "Workdir 선택",
+    });
+    if (typeof selected === "string") {
+      updateNode(node.id, { workdir: selected });
+    }
+  }
 
   if (!selectedId || !node) {
     return (
@@ -64,11 +89,25 @@ function Inspector() {
       </Field>
 
       <Field label="Workdir (선택)">
-        <Input
-          value={node.workdir ?? ""}
-          placeholder="(워크스페이스 루트)"
-          onChange={(event) => updateNode(node.id, { workdir: event.target.value || null })}
-        />
+        <div className="inline-input inline-input--workdir">
+          <Input
+            value={node.workdir ?? ""}
+            readOnly
+            title={node.workdir || activeProject?.root}
+            placeholder={activeProject ? activeProject.name : "프로젝트 루트"}
+          />
+          <Button size="sm" variant="ghost" onClick={browseWorkdir}>
+            Browse...
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={!node.workdir}
+            onClick={() => updateNode(node.id, { workdir: null })}
+          >
+            Clear
+          </Button>
+        </div>
       </Field>
 
       <Field label="Prompt">

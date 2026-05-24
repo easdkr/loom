@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
+import { lastPathSegments } from "@core/index";
 import { Panel, Statusbar, StatusbarSpacer, Button } from "@design/components";
-import { useExecutionStore, useGraphStore } from "@stores/index";
+import { useExecutionStore, useGraphStore, useWorkspaceStore } from "@stores/index";
 import GraphCanvas from "./plan/GraphCanvas";
 import NodePalette from "./plan/NodePalette";
 import Inspector from "./plan/Inspector";
@@ -20,6 +21,10 @@ function PlanMode() {
   const activeNodeIds = useExecutionStore((state) => state.activeNodeIds);
   const runId = useExecutionStore((state) => state.runId);
   const clearExecution = useExecutionStore((state) => state.clear);
+  const activeTabId = useWorkspaceStore((state) => state.activeTabId);
+  const activeProject = useWorkspaceStore((state) =>
+    state.projects.find((project) => project.id === activeTabId),
+  );
   const { runPlan, cancelNode } = usePlanExecution();
   const [message, setMessage] = useState("Ready");
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -151,6 +156,7 @@ function PlanMode() {
         <span className="loom-status-dot" />
         <span>{message}</span>
         <StatusbarSpacer />
+        <span>{activeProject ? lastPathSegments(activeProject.root) : "no project"}</span>
         <span>
           nodes: {nodeCount} · edges: {edgeCount} · active: {activeNodeIds.length}
         </span>

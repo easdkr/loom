@@ -12,8 +12,10 @@ import {
   type EdgeChange,
   type Node,
   type NodeChange,
+  useNodesInitialized,
+  useReactFlow,
 } from "@xyflow/react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import "@xyflow/react/dist/style.css";
 
 import { useExecutionStore, useGraphStore, type GraphEdge } from "@stores/index";
@@ -43,6 +45,9 @@ function GraphCanvasInner() {
   const setEdges = useGraphStore((state) => state.setEdges);
   const selectNode = useGraphStore((state) => state.selectNode);
   const perNode = useExecutionStore((state) => state.perNode);
+  const nodesInitialized = useNodesInitialized();
+  const { fitView } = useReactFlow();
+  const lastFittedNodeKey = useRef("");
 
   const flowNodes = useMemo<FlowNode[]>(
     () =>
@@ -63,6 +68,24 @@ function GraphCanvasInner() {
   );
 
   const flowEdges = useMemo(() => graphEdges.map(toFlowEdge), [graphEdges]);
+
+  useEffect(() => {
+    if (!nodesInitialized || flowNodes.length === 0) {
+      return;
+    }
+
+    const nodeKey = flowNodes
+      .map((node) => `${node.id}:${node.position.x}:${node.position.y}`)
+      .join("|");
+    if (lastFittedNodeKey.current === nodeKey) {
+      return;
+    }
+
+    lastFittedNodeKey.current = nodeKey;
+    requestAnimationFrame(() => {
+      void fitView({ padding: 0.2, duration: 200 });
+    });
+  }, [fitView, flowNodes, nodesInitialized]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<FlowNode>[]) => {

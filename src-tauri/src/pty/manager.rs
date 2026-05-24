@@ -70,9 +70,7 @@ pub struct PtyRunOutcome {
 
 impl PtyRunOutcome {
     pub fn success(&self) -> bool {
-        self.error_class.is_none()
-            && !self.timed_out
-            && self.exit_code.unwrap_or(0) == 0
+        self.error_class.is_none() && !self.timed_out && self.exit_code.unwrap_or(0) == 0
     }
 }
 
@@ -217,7 +215,8 @@ impl PtyManager {
         node_id: String,
     ) -> Result<PtyRunOutcome, String> {
         validate_provider_for_execution(&provider)?;
-        let completion_pattern = compile_pattern(&provider.completion_pattern, "completion", &provider.name)?;
+        let completion_pattern =
+            compile_pattern(&provider.completion_pattern, "completion", &provider.name)?;
         let error_pattern = compile_pattern(&provider.error_pattern, "error", &provider.name)?;
         let mut detector = CompletionDetector::new(
             completion_pattern,
@@ -458,9 +457,9 @@ fn compile_pattern(
         return Ok(None);
     }
 
-    Regex::new(trimmed).map(Some).map_err(|error| {
-        format!("invalid {kind} pattern for {provider_name}: {error}")
-    })
+    Regex::new(trimmed)
+        .map(Some)
+        .map_err(|error| format!("invalid {kind} pattern for {provider_name}: {error}"))
 }
 
 fn normalize_pty_size(cols: u16, rows: u16) -> PtySize {

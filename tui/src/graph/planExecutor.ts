@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import path from "node:path";
 import type { ExecutionPlan, NodeConfig } from "../../../src/core/task-graph.js";
 import type { ProviderConfig } from "../../../src/providers/types.js";
 import { topologicalBatches } from "./topology.js";
@@ -19,12 +20,25 @@ export interface PlanExecutorOptions {
   providers: Map<string, ProviderConfig>;
   skip?: Set<string>;
   concurrencyLimit?: number;
+  projectRoot?: string;
+}
+
+export function resolveNodeWorkdir(
+  workdir: string | null | undefined,
+  projectRoot?: string,
+): string {
+  const baseRoot = projectRoot ?? process.cwd();
+  if (!workdir) {
+    return baseRoot;
+  }
+  return path.isAbsolute(workdir) ? workdir : path.resolve(baseRoot, workdir);
 }
 
 export class PlanExecutor extends EventEmitter {
   readonly runId: string;
   readonly plan: ExecutionPlan;
   readonly multiplexer: PtyMultiplexer;
+  readonly projectRoot?: string;
   private readonly providers: Map<string, ProviderConfig>;
   private readonly skip: Set<string>;
   private readonly outcomes = new Map<string, PtyOutcome>();
@@ -34,6 +48,7 @@ export class PlanExecutor extends EventEmitter {
     super();
     this.runId = options.runId;
     this.plan = options.plan;
+    this.projectRoot = options.projectRoot;
     this.providers = options.providers;
     this.skip = options.skip ?? new Set();
     this.multiplexer = new PtyMultiplexer({
@@ -124,7 +139,7 @@ export class PlanExecutor extends EventEmitter {
       nodeId: node.id,
       provider,
       prompt: node.prompt,
-      workdir: node.workdir ?? undefined,
+      workdir: resolveNodeWorkdir(node.workdir, this.projectRoot),
       env: node.env,
       timeoutMs: node.timeout_ms ?? null,
     });

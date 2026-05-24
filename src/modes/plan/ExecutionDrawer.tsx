@@ -19,9 +19,13 @@ interface NodeTerminalProps {
 
 function NodeTerminal({ nodeId }: NodeTerminalProps) {
   const terminalRef = useRef<TerminalOutputHandle | null>(null);
+  const bufferedOutput = useExecutionStore((state) => state.outputByNode[nodeId] ?? "");
 
   useEffect(() => {
     terminalRef.current?.reset();
+    if (bufferedOutput) {
+      terminalRef.current?.write(bufferedOutput);
+    }
     const unsubscribe = subscribeToTerminal(nodeId, (chunk) => {
       terminalRef.current?.write(chunk);
     });

@@ -7,6 +7,7 @@ import { StreamPanel } from "../../components/StreamPanel.js";
 import { StatusBar, type StatusLevel } from "../../components/StatusBar.js";
 import { PlanExecutor } from "../../graph/planExecutor.js";
 import { toExecutionPlan, type PlanDraft } from "../../plan/planSchema.js";
+import type { ProjectContext } from "../index.js";
 import type { ProviderConfig } from "../../../../src/providers/types.js";
 import type { PtyOutcome } from "../../pty/ptySession.js";
 
@@ -25,6 +26,7 @@ interface PlanModeProps {
   initialDraft: PlanDraft;
   providers: ProviderConfig[];
   configPath: string;
+  project: ProjectContext;
   autoApprove?: boolean;
   runIdPrefix?: string;
 }
@@ -86,6 +88,7 @@ export function PlanMode(props: PlanModeProps) {
       providers: providersMap,
       skip,
       concurrencyLimit: 2,
+      projectRoot: props.project.root,
     });
     executorRef.current = executor;
 
@@ -235,7 +238,7 @@ export function PlanMode(props: PlanModeProps) {
     <Box flexDirection="column" paddingX={1}>
       <Banner
         mode={`Plan · ${runId}`}
-        hint={`${draft.nodes.length} nodes · ${props.configPath}`}
+        hint={`${props.project.name} · ${props.project.root} · ${draft.nodes.length} nodes · ${props.configPath}`}
       />
       {phase === "review" ? (
         <PlanReview

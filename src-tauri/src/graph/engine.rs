@@ -161,7 +161,9 @@ pub fn topological_batches(plan: &ExecutionPlan) -> Result<Vec<Vec<NodeConfig>>,
 fn upstream_map(plan: &ExecutionPlan) -> HashMap<String, Vec<String>> {
     let mut map: HashMap<String, Vec<String>> = HashMap::new();
     for edge in &plan.edges {
-        map.entry(edge.to.clone()).or_default().push(edge.from.clone());
+        map.entry(edge.to.clone())
+            .or_default()
+            .push(edge.from.clone());
     }
     map
 }
@@ -267,9 +269,7 @@ fn dispatch_node(
     match node.node_type.as_str() {
         "collector:result" => run_collector(app, run_id, node, upstream, outputs),
         "orchestrator:pipeline" => run_pipeline_sync(app, run_id, node, upstream, outputs),
-        "reviewer:human" => {
-            run_human_review(app, review_registry, run_id, node, upstream, outputs)
-        }
+        "reviewer:human" => run_human_review(app, review_registry, run_id, node, upstream, outputs),
         _ => run_pty_node(app, pty_manager, providers, run_id, node),
     }
 }

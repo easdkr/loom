@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { PlanExecutor } from "../src/graph/planExecutor.js";
 import { fallbackProviders } from "../../src/providers/index.js";
 import type { ExecutionPlan } from "../../src/core/task-graph.js";
@@ -10,13 +13,13 @@ if (!shellProvider) {
 }
 const providersMap = new Map([[shellProvider.name, shellProvider]]);
 
-function shellNode(id: string, prompt: string) {
+function shellNode(id: string, prompt: string, workdir: string | null = null) {
   return {
     id,
     type: "worker:pty",
     provider: shellProvider!.name,
     prompt,
-    workdir: null,
+    workdir,
     env: {},
     timeout_ms: 15000,
   };
@@ -92,5 +95,43 @@ test(
     assert.deepEqual(result.skipped, ["middle"]);
     assert.deepEqual(result.completed.sort(), ["first", "last"]);
     assert.equal(result.outcomes.middle, undefined);
+  },
+);
+
+test(
+  "PlanExecutor resolves null and relative node workdirs against the project root",
+  { timeout: 60_000 },
+  async () => {
+    const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "loom-project-root-"));
+    const nestedRoot = path.join(projectRoot, "nested");
+    await fs.mkdir(nestedRoot, { recursive: true });
+
+    try {
+      const plan: ExecutionPlan = {
+        nodes: [
+          shellNode("root-node", "pwd"),
+          shellNode("nested-node", "pwd", "nested"),
+        ],
+        edges: [{ from: "root-node", to: "nested-node" }],
+        mode: "sequential",
+      };
+
+      const executor = new PlanExecutor({
+        runId: "plan-project-root-test",
+        plan,
+        providers: providersMap,
+        projectRoot,
+      });
+
+      const result = await executor.run();
+      assert.equal(result.failed.length, 0);
+      assert.match(result.outcomes["root-node"]!.result, new RegExp(projectRoot.replaceAll("\\", "\\\\")));
+      assert.match(
+        result.outcomes["nested-node"]!.result,
+        new RegExp(nestedRoot.replaceAll("\\", "\\\\")),
+      );
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
   },
 );
