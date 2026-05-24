@@ -16,7 +16,10 @@ use templates::{
     delete_template, list_templates, load_template, save_template, TemplatePayload,
     TemplatesResponse,
 };
-use workspace::{load_workspace, save_workspace, workspace_path};
+use workspace::{
+    load_project_graph, load_workspace, project_graph_path, save_project_graph, save_workspace,
+    workspace_path,
+};
 
 #[derive(Clone, Default)]
 struct LoomState {
@@ -61,6 +64,23 @@ struct WorkspaceSaveRequest {
 
 #[derive(Debug, Clone, Serialize)]
 struct WorkspaceLoadResponse {
+    path: String,
+    payload: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ProjectGraphSaveRequest {
+    root: String,
+    payload: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ProjectGraphLoadRequest {
+    root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectGraphLoadResponse {
     path: String,
     payload: Option<String>,
 }
@@ -197,6 +217,22 @@ fn workspace_load() -> Result<WorkspaceLoadResponse, String> {
 }
 
 #[tauri::command]
+fn project_graph_save(request: ProjectGraphSaveRequest) -> Result<String, String> {
+    save_project_graph(&request.root, &request.payload).map(|path| path.display().to_string())
+}
+
+#[tauri::command]
+fn project_graph_load(
+    request: ProjectGraphLoadRequest,
+) -> Result<ProjectGraphLoadResponse, String> {
+    let payload = load_project_graph(&request.root)?;
+    Ok(ProjectGraphLoadResponse {
+        path: project_graph_path(&request.root).display().to_string(),
+        payload,
+    })
+}
+
+#[tauri::command]
 fn list_templates_command() -> Result<TemplatesResponse, String> {
     list_templates()
 }
@@ -245,6 +281,8 @@ pub fn run() {
             node_reject,
             workspace_save,
             workspace_load,
+            project_graph_save,
+            project_graph_load,
             list_templates_command,
             load_template_command,
             save_template_command,
