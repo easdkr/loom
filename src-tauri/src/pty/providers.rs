@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, env, fs, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 const DEFAULT_COMPLETION_TIMEOUT_MS: u64 = 30 * 60 * 1000;
 const DEFAULT_IDLE_TIMEOUT_MS: u64 = 5 * 60 * 1000;
@@ -179,25 +183,33 @@ pub fn default_provider_configs() -> Result<Vec<ProviderConfig>, String> {
 }
 
 pub fn load_provider_configs() -> Result<Vec<ProviderConfig>, String> {
+    load_provider_configs_with_override(None::<&Path>)
+}
+
+pub fn load_provider_configs_with_override(
+    override_path: Option<impl AsRef<Path>>,
+) -> Result<Vec<ProviderConfig>, String> {
+    load_provider_configs_from_paths(
+        &providers_config_path(),
+        &provider_plugins_dir(),
+        override_path.as_ref().map(|path| path.as_ref()),
+    )
+}
+
+fn load_provider_configs_from_paths(
+    global_path: &Path,
+    plugin_dir: &Path,
+    override_path: Option<&Path>,
+) -> Result<Vec<ProviderConfig>, String> {
     let mut providers = default_provider_configs()?;
 
-    for plugin in load_plugin_providers()? {
+    for plugin in load_plugin_providers_from_dir(plugin_dir)? {
         merge_provider(&mut providers, plugin);
     }
 
-    let path = providers_config_path();
-    if !path.exists() {
-        return Ok(providers);
-    }
-
-    let file = fs::read_to_string(&path)
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    let user_providers = parse_provider_toml(&file)
-        .map_err(|error| format!("failed to parse {}: {error}", path.display()))?
-        .providers;
-
-    for provider in user_providers {
-        merge_provider(&mut providers, provider);
+    merge_providers_from_path(&mut providers, global_path)?;
+    if let Some(path) = override_path {
+        merge_providers_from_path(&mut providers, path)?;
     }
 
     Ok(providers)
@@ -214,14 +226,33 @@ fn merge_provider(providers: &mut Vec<ProviderConfig>, provider: ProviderConfig)
     }
 }
 
-fn load_plugin_providers() -> Result<Vec<ProviderConfig>, String> {
-    let dir = provider_plugins_dir();
+fn merge_providers_from_path(
+    providers: &mut Vec<ProviderConfig>,
+    path: &Path,
+) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let file = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let parsed = parse_provider_toml(&file)
+        .map_err(|error| format!("failed to parse {}: {error}", path.display()))?;
+
+    for provider in parsed.providers {
+        merge_provider(providers, provider);
+    }
+
+    Ok(())
+}
+
+fn load_plugin_providers_from_dir(dir: &Path) -> Result<Vec<ProviderConfig>, String> {
     if !dir.exists() {
         return Ok(Vec::new());
     }
     let mut collected = Vec::new();
-    let entries = fs::read_dir(&dir)
-        .map_err(|error| format!("failed to read {}: {error}", dir.display()))?;
+    let entries =
+        fs::read_dir(dir).map_err(|error| format!("failed to read {}: {error}", dir.display()))?;
     for entry in entries {
         let entry = entry.map_err(|error| format!("plugin entry read failed: {error}"))?;
         let path = entry.path();
@@ -276,8 +307,13 @@ fn is_claude_print_provider(provider: &ProviderConfig) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_provider_configs, providers_config_path, validate_provider_for_execution,
-        ProviderInputMode,
+        default_provider_configs, load_provider_configs_from_paths, providers_config_path,
+        validate_provider_for_execution, ProviderInputMode,
+    };
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
     };
 
     #[test]
@@ -337,5 +373,89 @@ mod tests {
         assert!(validate_provider_for_execution(&claude)
             .unwrap_err()
             .contains("forbidden"));
+    }
+
+    #[test]
+    fn override_path_has_highest_precedence_after_global_and_plugins() {
+        let root = temp_project_root("provider-override");
+        let global_path = root.join("providers.toml");
+        let plugin_dir = root.join("plugins");
+        let override_path = root.join("project-providers.toml");
+
+        fs::create_dir_all(&plugin_dir).expect("create plugin dir");
+        fs::write(
+            plugin_dir.join("plugin.toml"),
+            provider_toml("shell", "/plugin-shell"),
+        )
+        .expect("write plugin provider");
+        fs::write(&global_path, provider_toml("shell", "/global-shell"))
+            .expect("write global provider");
+        fs::write(&override_path, provider_toml("shell", "/project-shell"))
+            .expect("write project provider");
+
+        let shell =
+            load_provider_configs_from_paths(&global_path, &plugin_dir, Some(&override_path))
+                .expect("load providers")
+                .into_iter()
+                .find(|provider| provider.name == "shell")
+                .expect("shell provider");
+
+        assert_eq!(shell.command, "/project-shell");
+
+        fs::remove_dir_all(root).expect("remove temp provider root");
+    }
+
+    #[test]
+    fn global_override_wins_when_project_override_missing() {
+        let root = temp_project_root("provider-global");
+        let global_path = root.join("providers.toml");
+        let plugin_dir = root.join("plugins");
+        let missing_override = root.join("missing.toml");
+
+        fs::create_dir_all(&plugin_dir).expect("create plugin dir");
+        fs::write(
+            plugin_dir.join("plugin.toml"),
+            provider_toml("shell", "/plugin-shell"),
+        )
+        .expect("write plugin provider");
+        fs::write(&global_path, provider_toml("shell", "/global-shell"))
+            .expect("write global provider");
+
+        let shell =
+            load_provider_configs_from_paths(&global_path, &plugin_dir, Some(&missing_override))
+                .expect("load providers")
+                .into_iter()
+                .find(|provider| provider.name == "shell")
+                .expect("shell provider");
+
+        assert_eq!(shell.command, "/global-shell");
+
+        fs::remove_dir_all(root).expect("remove temp provider root");
+    }
+
+    fn provider_toml(name: &str, command: &str) -> String {
+        format!(
+            r#"[[providers]]
+name = "{name}"
+type = "pty"
+command = "{command}"
+args = []
+input_mode = "stdin"
+"#
+        )
+    }
+
+    fn temp_project_root(label: &str) -> PathBuf {
+        let root = temp_path(label);
+        fs::create_dir_all(&root).expect("create temp provider root");
+        root
+    }
+
+    fn temp_path(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("loom-provider-test-{label}-{nanos}"))
     }
 }

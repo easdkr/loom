@@ -7,7 +7,9 @@ mod workspace;
 use graph::{engine::execute_plan_background, types::ExecutionPlan};
 use pty::{
     manager::{PtyManager, PtyTask},
-    providers::{find_provider, load_provider_configs, providers_config_path, ProviderConfig},
+    providers::{
+        find_provider, load_provider_configs_with_override, providers_config_path, ProviderConfig,
+    },
 };
 use review::{HumanReviewDecision, HumanReviewRegistry};
 use serde::{Deserialize, Serialize};
@@ -17,8 +19,8 @@ use templates::{
     TemplatesResponse,
 };
 use workspace::{
-    load_project_graph, load_workspace, project_graph_path, save_project_graph, save_workspace,
-    workspace_path,
+    load_project_graph, load_workspace, normalize_project_root as canonicalize_project_root,
+    project_graph_path, save_project_graph, save_workspace, workspace_path,
 };
 
 #[derive(Clone, Default)]
@@ -31,6 +33,11 @@ struct LoomState {
 struct ProvidersResponse {
     providers: Vec<ProviderConfig>,
     config_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ListProvidersRequest {
+    override_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -66,6 +73,16 @@ struct WorkspaceSaveRequest {
 struct WorkspaceLoadResponse {
     path: String,
     payload: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct NormalizeProjectRootRequest {
+    root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct NormalizeProjectRootResponse {
+    root: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -123,10 +140,11 @@ struct TemplateLoadResponse {
 }
 
 #[tauri::command]
-fn list_providers() -> Result<ProvidersResponse, String> {
+fn list_providers(request: Option<ListProvidersRequest>) -> Result<ProvidersResponse, String> {
+    let override_path = request.and_then(|request| request.override_path);
     Ok(ProvidersResponse {
-        providers: load_provider_configs()?,
-        config_path: providers_config_path().display().to_string(),
+        providers: load_provider_configs_with_override(override_path.as_deref())?,
+        config_path: override_path.unwrap_or_else(|| providers_config_path().display().to_string()),
     })
 }
 
@@ -217,6 +235,16 @@ fn workspace_load() -> Result<WorkspaceLoadResponse, String> {
 }
 
 #[tauri::command]
+fn normalize_project_root(
+    request: NormalizeProjectRootRequest,
+) -> Result<NormalizeProjectRootResponse, String> {
+    let root = canonicalize_project_root(&request.root)?;
+    Ok(NormalizeProjectRootResponse {
+        root: root.display().to_string(),
+    })
+}
+
+#[tauri::command]
 fn project_graph_save(request: ProjectGraphSaveRequest) -> Result<String, String> {
     save_project_graph(&request.root, &request.payload).map(|path| path.display().to_string())
 }
@@ -225,9 +253,10 @@ fn project_graph_save(request: ProjectGraphSaveRequest) -> Result<String, String
 fn project_graph_load(
     request: ProjectGraphLoadRequest,
 ) -> Result<ProjectGraphLoadResponse, String> {
+    let root = canonicalize_project_root(&request.root)?;
     let payload = load_project_graph(&request.root)?;
     Ok(ProjectGraphLoadResponse {
-        path: project_graph_path(&request.root).display().to_string(),
+        path: project_graph_path(&root).display().to_string(),
         payload,
     })
 }
@@ -269,6 +298,7 @@ fn delete_template_command(request: TemplateRequest) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(LoomState::default())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             list_providers,
@@ -281,6 +311,7 @@ pub fn run() {
             node_reject,
             workspace_save,
             workspace_load,
+            normalize_project_root,
             project_graph_save,
             project_graph_load,
             list_templates_command,

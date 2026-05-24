@@ -22,9 +22,7 @@ impl HumanReviewRegistry {
             .lock()
             .map_err(|_| "failed to lock human review registry".to_string())?;
         if map.contains_key(node_id) {
-            return Err(format!(
-                "human-review already pending for node {node_id}"
-            ));
+            return Err(format!("human-review already pending for node {node_id}"));
         }
         map.insert(node_id.to_string(), tx);
         Ok(rx)

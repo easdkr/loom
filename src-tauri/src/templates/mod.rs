@@ -57,9 +57,8 @@ pub fn list_templates() -> Result<TemplatesResponse, String> {
             }
             let raw = fs::read_to_string(&path)
                 .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-            let payload: TemplatePayload = serde_json::from_str(&raw).map_err(|error| {
-                format!("failed to parse template {}: {error}", path.display())
-            })?;
+            let payload: TemplatePayload = serde_json::from_str(&raw)
+                .map_err(|error| format!("failed to parse template {}: {error}", path.display()))?;
             let name = path
                 .file_stem()
                 .and_then(|stem| stem.to_str())

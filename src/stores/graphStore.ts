@@ -1,5 +1,7 @@
-import { create } from "zustand";
+import { useStore } from "zustand";
+import { createStore, type StoreApi } from "zustand/vanilla";
 import type { NodeMeta } from "@core/index";
+import { useWorkspaceStore } from "./workspaceStore";
 
 export interface GraphNode {
   id: string;
@@ -18,7 +20,7 @@ export interface GraphEdge {
   target: string;
 }
 
-interface GraphState {
+export interface GraphState {
   nodes: GraphNode[];
   edges: GraphEdge[];
   selectedNodeId: string | null;
@@ -34,7 +36,10 @@ interface GraphState {
   clear: () => void;
 }
 
-export const useGraphStore = create<GraphState>((set) => ({
+type GraphStoreApi = StoreApi<GraphState>;
+
+function createGraphStore(): GraphStoreApi {
+  return createStore<GraphState>((set) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
@@ -72,4 +77,39 @@ export const useGraphStore = create<GraphState>((set) => ({
     set((state) => ({ edges: state.edges.filter((e) => e.id !== id) })),
   selectNode: (id) => set({ selectedNodeId: id }),
   clear: () => set({ nodes: [], edges: [], selectedNodeId: null }),
-}));
+  }));
+}
+
+const emptyGraphStore = createGraphStore();
+const graphStores = new Map<string, GraphStoreApi>();
+
+export function getGraphStore(projectId: string): GraphStoreApi {
+  let store = graphStores.get(projectId);
+  if (!store) {
+    store = createGraphStore();
+    graphStores.set(projectId, store);
+  }
+  return store;
+}
+
+export function disposeGraphStore(projectId: string): void {
+  graphStores.delete(projectId);
+}
+
+function getActiveGraphStore(): GraphStoreApi {
+  const activeId = useWorkspaceStore.getState().activeTabId;
+  return activeId ? getGraphStore(activeId) : emptyGraphStore;
+}
+
+export const useGraphStore = Object.assign(
+  function useGraphStoreSelector<T>(selector: (state: GraphState) => T): T {
+    const activeId = useWorkspaceStore((state) => state.activeTabId);
+    const store = activeId ? getGraphStore(activeId) : emptyGraphStore;
+    return useStore(store, selector);
+  },
+  {
+    getState: () => getActiveGraphStore().getState(),
+    setState: (...args: Parameters<GraphStoreApi["setState"]>) =>
+      getActiveGraphStore().setState(...args),
+  },
+);

@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useExecutionStore, useGraphStore } from "@stores/index";
+import {
+  getActiveProject,
+  getExecutionStore,
+  getGraphStore,
+  useWorkspaceStore,
+} from "@stores/index";
+import { resolveWorkdir, scopeProjectId, splitProjectScopedId } from "@core/index";
 import type {
   PtyCompletePayload,
   PtyDataPayload,
@@ -28,17 +34,22 @@ type TerminalListener = (chunk: string) => void;
 
 const terminalListeners = new Map<string, Set<TerminalListener>>();
 
-export function subscribeToTerminal(nodeId: string, listener: TerminalListener): () => void {
-  let set = terminalListeners.get(nodeId);
+export function subscribeToTerminal(
+  nodeId: string,
+  listener: TerminalListener,
+  projectId = getActiveProject()?.id,
+): () => void {
+  const key = projectId ? scopeProjectId(projectId, nodeId) : nodeId;
+  let set = terminalListeners.get(key);
   if (!set) {
     set = new Set();
-    terminalListeners.set(nodeId, set);
+    terminalListeners.set(key, set);
   }
   set.add(listener);
   return () => {
     set?.delete(listener);
     if (set && set.size === 0) {
-      terminalListeners.delete(nodeId);
+      terminalListeners.delete(key);
     }
   };
 }
@@ -53,33 +64,36 @@ function emitTerminalChunk(nodeId: string, chunk: string) {
   }
 }
 
-export function usePlanExecution() {
-  const beginRun = useExecutionStore((state) => state.beginRun);
-  const setStatus = useExecutionStore((state) => state.setStatus);
-  const setActive = useExecutionStore((state) => state.setActive);
-  const activeNodeIdsRef = useRef<string[]>([]);
-
+export function ExecutionEventBridge() {
+  const activeNodeIdsRef = useRef<Record<string, string[]>>({});
   useEffect(() => {
     let cancelled = false;
     let registered: UnlistenFn[] = [];
 
-    function addActive(nodeId: string) {
-      const next = [...activeNodeIdsRef.current];
+    function addActive(projectId: string, nodeId: string) {
+      const store = getExecutionStore(projectId).getState();
+      const current = activeNodeIdsRef.current[projectId] ?? [];
+      const next = [...current];
       if (!next.includes(nodeId)) {
         next.push(nodeId);
-        activeNodeIdsRef.current = next;
-        setActive(next);
+        activeNodeIdsRef.current[projectId] = next;
+        store.setActive(next);
       }
     }
 
-    function removeActive(nodeId: string) {
-      const next = activeNodeIdsRef.current.filter((id) => id !== nodeId);
-      activeNodeIdsRef.current = next;
-      setActive(next);
+    function removeActive(projectId: string, nodeId: string) {
+      const store = getExecutionStore(projectId).getState();
+      const next = (activeNodeIdsRef.current[projectId] ?? []).filter((id) => id !== nodeId);
+      activeNodeIdsRef.current[projectId] = next;
+      store.setActive(next);
     }
 
     Promise.all([
       listen<PtyDataPayload>("pty:data", (event) => {
+        const { projectId, localId } = splitProjectScopedId(event.payload.node_id);
+        if (projectId) {
+          getExecutionStore(projectId).getState().appendOutput(localId, event.payload.chunk);
+        }
         emitTerminalChunk(event.payload.node_id, event.payload.chunk);
       }),
       listen<PtyCompletePayload>("pty:complete", (event) => {
@@ -91,9 +105,13 @@ export function usePlanExecution() {
           truncated,
           error_class,
         } = event.payload;
+        const { projectId, localId } = splitProjectScopedId(node_id);
+        if (!projectId) {
+          return;
+        }
         const failed =
           timed_out || (exit_code !== null && exit_code !== 0) || Boolean(error_class);
-        setStatus(node_id, {
+        getExecutionStore(projectId).getState().setStatus(localId, {
           status: failed ? "error" : "complete",
           exitCode: exit_code,
           completionReason: completion_reason,
@@ -101,33 +119,54 @@ export function usePlanExecution() {
           truncated: Boolean(truncated),
           errorClass: error_class ?? null,
         });
-        removeActive(node_id);
+        removeActive(projectId, localId);
       }),
       listen<PtyErrorPayload>("pty:error", (event) => {
-        setStatus(event.payload.node_id, {
+        const { projectId, localId } = splitProjectScopedId(event.payload.node_id);
+        if (!projectId) {
+          return;
+        }
+        getExecutionStore(projectId).getState().setStatus(localId, {
           status: "error",
           error: event.payload.error,
           completedAt: Date.now(),
         });
-        removeActive(event.payload.node_id);
+        removeActive(projectId, localId);
       }),
       listen<GraphNodeEvent>("graph:node-start", (event) => {
-        setStatus(event.payload.node_id, {
+        const { projectId, localId } = splitProjectScopedId(event.payload.node_id);
+        if (!projectId) {
+          return;
+        }
+        getExecutionStore(projectId).getState().setStatus(localId, {
           status: "running",
           startedAt: Date.now(),
         });
-        addActive(event.payload.node_id);
+        addActive(projectId, localId);
       }),
       listen<GraphNodeEvent>("graph:node-complete", () => {
         /* PTY complete event already updates status */
       }),
-      listen<GraphCompleteEvent>("graph:complete", () => {
-        activeNodeIdsRef.current = [];
-        setActive([]);
+      listen<GraphCompleteEvent>("graph:complete", (event) => {
+        const firstCompleted = event.payload.completed_nodes[0];
+        const projectId = firstCompleted ? splitProjectScopedId(firstCompleted).projectId : "";
+        if (!projectId) {
+          return;
+        }
+        activeNodeIdsRef.current[projectId] = [];
+        getExecutionStore(projectId).getState().setActive([]);
       }),
       listen<GraphErrorEvent>("graph:error", (event) => {
+        const scopedId = event.payload.node_id;
+        if (!scopedId) {
+          return;
+        }
+        const { projectId, localId } = splitProjectScopedId(scopedId);
+        if (!projectId) {
+          return;
+        }
         if (event.payload.node_id) {
-          setStatus(event.payload.node_id, {
+          getExecutionStore(projectId).getState().setStatus(localId, {
             status: "error",
             error: event.payload.error,
             completedAt: Date.now(),
@@ -150,10 +189,20 @@ export function usePlanExecution() {
       cancelled = true;
       registered.forEach((fn) => fn());
     };
-  }, [setStatus, setActive]);
+  }, []);
+
+  return null;
+}
+
+export function usePlanExecution() {
+  const activeProjectId = useWorkspaceStore((state) => state.activeTabId);
 
   const runPlan = useCallback(async () => {
-    const { nodes, edges } = useGraphStore.getState();
+    const project = getActiveProject();
+    if (!project) {
+      throw new Error("프로젝트를 먼저 선택하세요.");
+    }
+    const { nodes, edges } = getGraphStore(project.id).getState();
     const runnable = nodes.filter((node) => !node.skipped);
     if (runnable.length === 0) {
       throw new Error("실행할 노드가 없습니다.");
@@ -162,31 +211,36 @@ export function usePlanExecution() {
 
     const plan = {
       nodes: runnable.map((node) => ({
-        id: node.id,
+        id: scopeProjectId(project.id, node.id),
         type: node.type,
         provider: node.provider,
         prompt: node.prompt,
-        workdir: node.workdir ?? null,
+        workdir: resolveWorkdir(node, project),
         env: {},
         timeout_ms: null,
       })),
       edges: edges
         .filter((edge) => runnableIds.has(edge.source) && runnableIds.has(edge.target))
-        .map((edge) => ({ from: edge.source, to: edge.target })),
+        .map((edge) => ({
+          from: scopeProjectId(project.id, edge.source),
+          to: scopeProjectId(project.id, edge.target),
+        })),
       mode: "dag" as const,
     };
 
-    const runId = `run-${Date.now()}`;
-    beginRun(runId, runnable.map((node) => node.id));
-    activeNodeIdsRef.current = [];
+    const runId = scopeProjectId(project.id, `run-${Date.now()}`);
+    getExecutionStore(project.id).getState().beginRun(runId, runnable.map((node) => node.id));
 
     await invoke<string>("graph_execute", { request: { run_id: runId, plan } });
     return runId;
-  }, [beginRun]);
+  }, [activeProjectId]);
 
   const cancelNode = useCallback(async (nodeId: string) => {
-    await invoke("node_kill", { request: { node_id: nodeId } });
-  }, []);
+    const project = getActiveProject();
+    await invoke("node_kill", {
+      request: { node_id: project ? scopeProjectId(project.id, nodeId) : nodeId },
+    });
+  }, [activeProjectId]);
 
   return { runPlan, cancelNode };
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { lastPathSegments } from "@core/index";
 import {
   Badge,
   Button,
@@ -10,7 +11,7 @@ import {
   StatusbarSpacer,
   Textarea,
 } from "@design/components";
-import { useGraphStore, useSettingsStore } from "@stores/index";
+import { useGraphStore, useSettingsStore, useWorkspaceStore } from "@stores/index";
 import {
   fallbackProviders,
   type ProviderConfig,
@@ -37,6 +38,10 @@ function AutoMode() {
   const [providers, setProviders] = useState<ProviderConfig[]>(fallbackProviders);
   const [draft, setDraft] = useState<AutoGenerationResult | null>(null);
   const [message, setMessage] = useState("Ready");
+  const activeTabId = useWorkspaceStore((state) => state.activeTabId);
+  const activeProject = useWorkspaceStore((state) =>
+    state.projects.find((project) => project.id === activeTabId),
+  );
 
   const setNodes = useGraphStore((state) => state.setNodes);
   const setEdges = useGraphStore((state) => state.setEdges);
@@ -45,7 +50,11 @@ function AutoMode() {
 
   useEffect(() => {
     let cancelled = false;
-    invoke<ProvidersResponse>("list_providers")
+    invoke<ProvidersResponse>("list_providers", {
+      request: activeProject?.providersOverride
+        ? { override_path: activeProject.providersOverride }
+        : null,
+    })
       .then((response) => {
         if (!cancelled) {
           setProviders(response.providers);
@@ -57,7 +66,7 @@ function AutoMode() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [activeProject?.providersOverride]);
 
   const providerNames = useMemo(() => providers.map((provider) => provider.name), [providers]);
 
@@ -181,6 +190,7 @@ function AutoMode() {
       <Statusbar className="mode-statusbar">
         <span>Auto</span>
         <StatusbarSpacer />
+        <span>{activeProject ? lastPathSegments(activeProject.root) : "no project"}</span>
         <span>{message}</span>
       </Statusbar>
     </section>

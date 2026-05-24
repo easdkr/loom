@@ -1,9 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { lastPathSegments, resolveWorkdir, scopeProjectId } from "@core/index";
 import { fallbackProviders } from "@providers";
 import { Button, Statusbar, StatusbarSpacer } from "@design/components";
-import { useGraphStore, useSettingsStore } from "@stores/index";
+import {
+  getActiveProject,
+  getExecutionStore,
+  useGraphStore,
+  useSettingsStore,
+  useWorkspaceStore,
+} from "@stores/index";
 import { findPaletteEntry } from "@modes/plan/node-catalog";
 import TerminalOutput, { type TerminalOutputHandle, type TerminalSize } from "./TerminalOutput";
 import type {
@@ -19,6 +27,8 @@ type RunStatus = "idle" | "running" | "complete" | "error";
 
 function SingleMode() {
   const setMode = useSettingsStore((state) => state.setMode);
+  const activeProjectId = useWorkspaceStore((state) => state.activeTabId);
+  const activeProject = getActiveProject();
   const upsertNode = useGraphStore((state) => state.upsertNode);
   const selectNode = useGraphStore((state) => state.selectNode);
   const [providers, setProviders] = useState<ProviderConfig[]>(fallbackProviders);
@@ -31,6 +41,7 @@ function SingleMode() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [message, setMessage] = useState("Ready");
   const activeNodeIdRef = useRef<string | null>(null);
+  const activeFullNodeIdRef = useRef<string | null>(null);
   const terminalRef = useRef<TerminalOutputHandle | null>(null);
   const terminalSizeRef = useRef<TerminalSize | null>(null);
 
@@ -41,7 +52,11 @@ function SingleMode() {
   useEffect(() => {
     let isMounted = true;
 
-    invoke<ProvidersResponse>("list_providers")
+    invoke<ProvidersResponse>("list_providers", {
+      request: activeProject?.providersOverride
+        ? { override_path: activeProject.providersOverride }
+        : null,
+    })
       .then((response) => {
         if (!isMounted) {
           return;
@@ -62,7 +77,7 @@ function SingleMode() {
     return () => {
       isMounted = false;
     };
-  }, [selectedProvider]);
+  }, [activeProject?.providersOverride, selectedProvider]);
 
   useEffect(() => {
     let unlisteners: UnlistenFn[] = [];
@@ -70,13 +85,13 @@ function SingleMode() {
 
     Promise.all([
       listen<PtyDataPayload>("pty:data", (event) => {
-        if (event.payload.node_id !== activeNodeIdRef.current) {
+        if (event.payload.node_id !== activeFullNodeIdRef.current) {
           return;
         }
         terminalRef.current?.write(event.payload.chunk);
       }),
       listen<PtyCompletePayload>("pty:complete", (event) => {
-        if (event.payload.node_id !== activeNodeIdRef.current) {
+        if (event.payload.node_id !== activeFullNodeIdRef.current) {
           return;
         }
         setStatus(event.payload.timed_out ? "error" : "complete");
@@ -84,15 +99,17 @@ function SingleMode() {
           `${event.payload.completion_reason} - exit ${event.payload.exit_code ?? "n/a"}`,
         );
         activeNodeIdRef.current = null;
+        activeFullNodeIdRef.current = null;
         setActiveNodeId(null);
       }),
       listen<PtyErrorPayload>("pty:error", (event) => {
-        if (event.payload.node_id !== activeNodeIdRef.current) {
+        if (event.payload.node_id !== activeFullNodeIdRef.current) {
           return;
         }
         setStatus("error");
         setMessage(event.payload.error);
         activeNodeIdRef.current = null;
+        activeFullNodeIdRef.current = null;
         setActiveNodeId(null);
       }),
     ])
@@ -113,6 +130,10 @@ function SingleMode() {
     };
   }, []);
 
+  useEffect(() => {
+    setWorkdir("");
+  }, [activeProjectId]);
+
   const provider = useMemo(
     () => providers.find((item) => item.name === selectedProvider) ?? providers[0],
     [providers, selectedProvider],
@@ -124,13 +145,19 @@ function SingleMode() {
     if (!provider || !canRun) {
       return;
     }
+    if (!activeProject) {
+      setStatus("error");
+      setMessage("프로젝트를 먼저 선택하세요.");
+      return;
+    }
 
     const nodeId = `single-${Date.now()}`;
+    const fullNodeId = scopeProjectId(activeProject.id, nodeId);
     const request: PtyTaskRequest = {
-      node_id: nodeId,
+      node_id: fullNodeId,
       provider: provider.name,
       prompt,
-      workdir: workdir.trim() || null,
+      workdir: resolveWorkdir({ workdir }, activeProject),
       env: {},
       timeout_ms: null,
       cols: terminalSizeRef.current?.cols ?? provider.cols,
@@ -139,6 +166,9 @@ function SingleMode() {
 
     setActiveNodeId(nodeId);
     activeNodeIdRef.current = nodeId;
+    activeFullNodeIdRef.current = fullNodeId;
+    getExecutionStore(activeProject.id).getState().beginRun(fullNodeId, [nodeId]);
+    getExecutionStore(activeProject.id).getState().setActive([nodeId]);
     terminalRef.current?.reset();
     terminalRef.current?.focus();
     setStatus("running");
@@ -150,6 +180,7 @@ function SingleMode() {
       setStatus("error");
       setMessage(String(error));
       activeNodeIdRef.current = null;
+      activeFullNodeIdRef.current = null;
       setActiveNodeId(null);
     }
   }
@@ -160,7 +191,12 @@ function SingleMode() {
     }
 
     try {
-      await invoke("node_kill", { request: { node_id: activeNodeId } });
+      if (!activeFullNodeIdRef.current) {
+        return;
+      }
+      await invoke("node_kill", {
+        request: { node_id: activeFullNodeIdRef.current },
+      });
       setMessage("Kill requested");
     } catch (error) {
       setStatus("error");
@@ -174,8 +210,11 @@ function SingleMode() {
     }
 
     try {
+      if (!activeFullNodeIdRef.current) {
+        return;
+      }
       await invoke("node_write", {
-        request: { node_id: activeNodeId, input: `${stdin}\n` },
+        request: { node_id: activeFullNodeIdRef.current, input: `${stdin}\n` },
       });
       setStdin("");
     } catch (error) {
@@ -190,8 +229,14 @@ function SingleMode() {
     }
 
     try {
+      if (!activeFullNodeIdRef.current) {
+        return;
+      }
       await invoke("node_write", {
-        request: { node_id: activeNodeIdRef.current, input },
+        request: {
+          node_id: activeFullNodeIdRef.current,
+          input,
+        },
       });
     } catch (error) {
       setStatus("error");
@@ -231,7 +276,7 @@ function SingleMode() {
     try {
       await invoke("node_resize", {
         request: {
-          node_id: activeNodeIdRef.current,
+          node_id: activeFullNodeIdRef.current,
           cols: size.cols,
           rows: size.rows,
         },
@@ -240,6 +285,18 @@ function SingleMode() {
       if (!String(error).includes("not running")) {
         setMessage(String(error));
       }
+    }
+  }
+
+  async function browseWorkdir() {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: activeProject?.root,
+      title: "Workdir 선택",
+    });
+    if (typeof selected === "string") {
+      setWorkdir(selected);
     }
   }
 
@@ -268,11 +325,20 @@ function SingleMode() {
 
           <label className="field">
             <span>Workdir</span>
-            <input
-              value={workdir}
-              onChange={(event) => setWorkdir(event.target.value)}
-              placeholder={window.location.pathname}
-            />
+            <div className="inline-input inline-input--workdir">
+              <input
+                value={workdir}
+                readOnly
+                title={workdir || activeProject?.root}
+                placeholder={activeProject ? activeProject.name : "프로젝트 루트"}
+              />
+              <button type="button" onClick={browseWorkdir}>
+                Browse...
+              </button>
+              <button type="button" disabled={!workdir} onClick={() => setWorkdir("")}>
+                Clear
+              </button>
+            </div>
           </label>
 
           <label className="field field-grow">
@@ -332,6 +398,7 @@ function SingleMode() {
         <span className="loom-status-dot" />
         <span>{message}</span>
         <StatusbarSpacer />
+        <span>{activeProject ? lastPathSegments(activeProject.root) : "no project"}</span>
         <span>{provider?.name ?? "—"}</span>
       </Statusbar>
     </main>

@@ -18,6 +18,141 @@
   background: var(--bg-surface);
 }
 
+.loom-app-topbar-spacer {
+  min-width: var(--space-4);
+  flex: 1;
+}
+
+.loom-tabbar {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.loom-tabs {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  overflow: hidden;
+}
+
+.loom-tab {
+  position: relative;
+  min-width: var(--space-12);
+  max-width: calc(var(--space-12) * 4);
+  height: calc(var(--space-8) - var(--space-1));
+  min-height: calc(var(--space-8) - var(--space-1));
+  display: grid;
+  grid-template-columns: var(--space-1) var(--space-2) minmax(0, 1fr) var(--space-4);
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) 0 0;
+  border-color: var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.loom-tab[data-active="true"] {
+  border-color: var(--border-strong);
+  background: var(--bg-overlay);
+}
+
+.loom-tab-stripe {
+  width: var(--space-1);
+  align-self: stretch;
+  background: transparent;
+}
+
+.loom-tab[data-active="true"] .loom-tab-stripe {
+  background: var(--accent-default);
+}
+
+.loom-tab-status {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-xl);
+  background: var(--neutral-default);
+}
+
+.loom-tab[data-status="running"] .loom-tab-status {
+  background: var(--accent-default);
+  animation: pulse-running var(--motion-slow) var(--ease-in-out) infinite;
+}
+
+.loom-tab[data-status="complete"] .loom-tab-status {
+  background: var(--success-default);
+}
+
+.loom-tab[data-status="error"] .loom-tab-status {
+  background: var(--danger-default);
+}
+
+.loom-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  text-overflow: ellipsis;
+}
+
+.loom-tab-close {
+  color: var(--fg-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+.loom-tab-add {
+  width: var(--space-8);
+  padding: 0;
+  flex: none;
+}
+
+.empty-workspace {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  background: var(--bg-canvas);
+}
+
+.empty-workspace-primary {
+  min-width: calc(var(--space-12) * 5);
+  border-color: var(--accent-default);
+  background: var(--accent-muted);
+}
+
+.empty-workspace-recents {
+  width: min(100%, calc(var(--space-12) * 10));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.empty-workspace-recents button {
+  min-width: 0;
+  justify-content: flex-start;
+  gap: var(--space-3);
+}
+
+.empty-workspace-recents span,
+.empty-workspace-recents code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-workspace-recents code {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
 .loom-app-body {
   min-height: 0;
   display: flex;
@@ -247,6 +382,10 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-2);
+}
+
+.inline-input--workdir {
+  grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
 .provider-meta {

@@ -6,13 +6,15 @@ import { StatusBar, type StatusLevel } from "../../components/StatusBar.js";
 import { StreamPanel } from "../../components/StreamPanel.js";
 import { PromptForm } from "../../components/PromptForm.js";
 import { PtySession, type PtyOutcome } from "../../pty/ptySession.js";
+import type { ProjectContext } from "../index.js";
 import type { ProviderConfig } from "../../../../src/providers/types.js";
 
 interface RunSingleProps {
   provider: ProviderConfig;
   prompt: string;
-  workdir?: string;
+  workdir: string;
   configPath: string;
+  project: ProjectContext;
 }
 
 export function RunSingle(props: RunSingleProps) {
@@ -95,7 +97,10 @@ export function RunSingle(props: RunSingleProps) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Banner mode={`Single · ${props.provider.name}`} hint={props.configPath} />
+      <Banner
+        mode={`Single · ${props.provider.name}`}
+        hint={`${props.project.name} · ${props.workdir} · ${props.configPath}`}
+      />
       <StreamPanel
         nodeId={nodeId}
         provider={props.provider.name}
