@@ -9,6 +9,7 @@ import {
 } from "@stores/index";
 import { resolveWorkdir, scopeProjectId, splitProjectScopedId } from "@core/index";
 import type {
+  PtyAgentPayload,
   PtyCompletePayload,
   PtyDataPayload,
   PtyErrorPayload,
@@ -92,9 +93,23 @@ export function ExecutionEventBridge() {
       listen<PtyDataPayload>("pty:data", (event) => {
         const { projectId, localId } = splitProjectScopedId(event.payload.node_id);
         if (projectId) {
-          getExecutionStore(projectId).getState().appendOutput(localId, event.payload.chunk);
+          const store = getExecutionStore(projectId).getState();
+          store.appendOutput(localId, event.payload.chunk);
         }
         emitTerminalChunk(event.payload.node_id, event.payload.chunk);
+      }),
+      listen<PtyAgentPayload>("pty:agent", (event) => {
+        const { projectId, localId } = splitProjectScopedId(event.payload.node_id);
+        if (!projectId) {
+          return;
+        }
+        getExecutionStore(projectId)
+          .getState()
+          .applyAgentTranscript(
+            localId,
+            event.payload.assistant_content,
+            event.payload.activity ?? undefined,
+          );
       }),
       listen<PtyCompletePayload>("pty:complete", (event) => {
         const {
@@ -111,7 +126,8 @@ export function ExecutionEventBridge() {
         }
         const failed =
           timed_out || (exit_code !== null && exit_code !== 0) || Boolean(error_class);
-        getExecutionStore(projectId).getState().setStatus(localId, {
+        const store = getExecutionStore(projectId).getState();
+        store.setStatus(localId, {
           status: failed ? "error" : "complete",
           exitCode: exit_code,
           completionReason: completion_reason,
@@ -119,6 +135,10 @@ export function ExecutionEventBridge() {
           truncated: Boolean(truncated),
           errorClass: error_class ?? null,
         });
+        store.completeTranscript(
+          localId,
+          `${completion_reason} - exit ${exit_code ?? "n/a"}`,
+        );
         removeActive(projectId, localId);
       }),
       listen<PtyErrorPayload>("pty:error", (event) => {
@@ -126,11 +146,13 @@ export function ExecutionEventBridge() {
         if (!projectId) {
           return;
         }
-        getExecutionStore(projectId).getState().setStatus(localId, {
+        const store = getExecutionStore(projectId).getState();
+        store.setStatus(localId, {
           status: "error",
           error: event.payload.error,
           completedAt: Date.now(),
         });
+        store.failTranscript(localId, event.payload.error);
         removeActive(projectId, localId);
       }),
       listen<GraphNodeEvent>("graph:node-start", (event) => {
@@ -138,7 +160,8 @@ export function ExecutionEventBridge() {
         if (!projectId) {
           return;
         }
-        getExecutionStore(projectId).getState().setStatus(localId, {
+        const store = getExecutionStore(projectId).getState();
+        store.setStatus(localId, {
           status: "running",
           startedAt: Date.now(),
         });
@@ -166,11 +189,13 @@ export function ExecutionEventBridge() {
           return;
         }
         if (event.payload.node_id) {
-          getExecutionStore(projectId).getState().setStatus(localId, {
+          const store = getExecutionStore(projectId).getState();
+          store.setStatus(localId, {
             status: "error",
             error: event.payload.error,
             completedAt: Date.now(),
           });
+          store.failTranscript(localId, event.payload.error);
         }
       }),
     ])
@@ -229,7 +254,11 @@ export function usePlanExecution() {
     };
 
     const runId = scopeProjectId(project.id, `run-${Date.now()}`);
-    getExecutionStore(project.id).getState().beginRun(runId, runnable.map((node) => node.id));
+    const store = getExecutionStore(project.id).getState();
+    store.beginRun(runId, runnable.map((node) => node.id));
+    for (const node of runnable) {
+      store.beginTranscript(node.id, node.prompt);
+    }
 
     await invoke<string>("graph_execute", { request: { run_id: runId, plan } });
     return runId;
@@ -242,5 +271,29 @@ export function usePlanExecution() {
     });
   }, [activeProjectId]);
 
-  return { runPlan, cancelNode };
+  const writeNodeInput = useCallback(async (nodeId: string, input: string) => {
+    const project = getActiveProject();
+    if (project) {
+      await getExecutionStore(project.id).getState().appendUserMessage(nodeId, input);
+    }
+    // Ink-based agents (claude, codex) submit on \r in raw mode, not \n.
+    await invoke("node_write", {
+      request: {
+        node_id: project ? scopeProjectId(project.id, nodeId) : nodeId,
+        input: `${input}\r`,
+      },
+    });
+  }, [activeProjectId]);
+
+  const writeNodeControl = useCallback(async (nodeId: string, input: string) => {
+    const project = getActiveProject();
+    await invoke("node_write", {
+      request: {
+        node_id: project ? scopeProjectId(project.id, nodeId) : nodeId,
+        input,
+      },
+    });
+  }, [activeProjectId]);
+
+  return { runPlan, cancelNode, writeNodeInput, writeNodeControl };
 }

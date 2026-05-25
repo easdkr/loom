@@ -1,7 +1,23 @@
-import type { ProviderConfig } from "./types";
+import type { ProviderConfig, ProviderDisplayMode } from "./types";
 
 const RATE_LIMIT_PATTERN =
   "(?i)(rate.?limit|429 too many|usage limit|quota exceeded|context length exceeded)";
+const AGENT_COMPLETION_PATTERN =
+  "(?m)(Task complete|Done|Finished|>\\s*$|^[\\s*✢✳✽✻✣✶✱✦✧✩✪✫⚡+·•◦°]*[A-Za-z][A-Za-z -]{1,40}(?:ed|ing)\\s+for\\s+(?:\\d+m\\s*)?\\d+s\\s*$)";
+
+export function defaultDisplayModeForProvider(
+  provider: Pick<ProviderConfig, "name" | "command">,
+): ProviderDisplayMode {
+  const identity = `${provider.name} ${provider.command}`.toLowerCase();
+  if (
+    identity.includes("claude") ||
+    identity.includes("codex") ||
+    identity.includes("cursor")
+  ) {
+    return "agent";
+  }
+  return "terminal";
+}
 
 export const fallbackProviders: ProviderConfig[] = [
   {
@@ -12,6 +28,7 @@ export const fallbackProviders: ProviderConfig[] = [
     env: { FORCE_COLOR: "0", NO_COLOR: "1", TERM: "xterm-256color" },
     completion_pattern: "(?m)^LOOM_EXIT:\\d+\\r?$",
     input_mode: "append-arg",
+    display_mode: "terminal",
     cols: 220,
     rows: 50,
     completion_timeout_ms: 120000,
@@ -26,8 +43,9 @@ export const fallbackProviders: ProviderConfig[] = [
     command: "claude",
     args: ["--permission-mode", "bypassPermissions"],
     env: { FORCE_COLOR: "0", NO_COLOR: "1", TERM: "xterm-256color" },
-    completion_pattern: "(?m)(Task complete|Done|Finished|>\\s*$)",
+    completion_pattern: AGENT_COMPLETION_PATTERN,
     input_mode: "append-arg",
+    display_mode: "agent",
     cols: 220,
     rows: 50,
     completion_timeout_ms: 1800000,
@@ -40,17 +58,11 @@ export const fallbackProviders: ProviderConfig[] = [
     name: "codex",
     type: "pty",
     command: "codex",
-    args: [
-      "exec",
-      "--sandbox",
-      "workspace-write",
-      "--skip-git-repo-check",
-      "--color",
-      "never",
-    ],
+    args: [],
     env: { FORCE_COLOR: "0", NO_COLOR: "1", TERM: "xterm-256color" },
-    completion_pattern: "(?m)(Task complete|Done|Finished)",
+    completion_pattern: AGENT_COMPLETION_PATTERN,
     input_mode: "append-arg",
+    display_mode: "agent",
     cols: 220,
     rows: 50,
     completion_timeout_ms: 1800000,
@@ -65,8 +77,9 @@ export const fallbackProviders: ProviderConfig[] = [
     command: "cursor-agent",
     args: [],
     env: { FORCE_COLOR: "0", NO_COLOR: "1", TERM: "xterm-256color" },
-    completion_pattern: "(?m)(Task complete|Done|Finished|>\\s*$)",
+    completion_pattern: AGENT_COMPLETION_PATTERN,
     input_mode: "stdin",
+    display_mode: "agent",
     cols: 220,
     rows: 50,
     completion_timeout_ms: 1800000,
@@ -79,8 +92,10 @@ export const fallbackProviders: ProviderConfig[] = [
 
 export type {
   ProviderConfig,
+  ProviderDisplayMode,
   ProviderInputMode,
   ProvidersResponse,
+  PtyAgentPayload,
   PtyCompletePayload,
   PtyDataPayload,
   PtyErrorPayload,

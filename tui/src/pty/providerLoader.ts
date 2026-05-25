@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { fallbackProviders } from "../../../src/providers/index.js";
+import {
+  defaultDisplayModeForProvider,
+  fallbackProviders,
+} from "../../../src/providers/index.js";
 import type { ProviderConfig } from "../../../src/providers/types.js";
 
 export function providersConfigPath(): string {
@@ -185,6 +188,12 @@ function withDefaults(p: ParsedProvider): ProviderConfig {
     env: (p.env ?? {}) as Record<string, string>,
     completion_pattern: p.completion_pattern ?? "",
     input_mode: (p.input_mode as ProviderConfig["input_mode"]) ?? "stdin",
+    display_mode:
+      (p.display_mode as ProviderConfig["display_mode"]) ??
+      defaultDisplayModeForProvider({
+        name: p.name ?? "unknown",
+        command: p.command ?? "",
+      }),
     cols: p.cols ?? 220,
     rows: p.rows ?? 50,
     completion_timeout_ms: p.completion_timeout_ms ?? 30 * 60 * 1000,

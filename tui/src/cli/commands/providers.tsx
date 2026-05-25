@@ -33,7 +33,7 @@ export function ProvidersList(props: ProvidersListProps) {
               <Text color="gray">{provider.args.length > 0 ? ` ${provider.args.join(" ")}` : ""}</Text>
             </Text>
             <Text color="gray">
-              input_mode={provider.input_mode} · cols={provider.cols} rows={provider.rows} ·
+              input_mode={provider.input_mode} · display_mode={provider.display_mode ?? "terminal"} · cols={provider.cols} rows={provider.rows} ·
               completion_timeout_ms={provider.completion_timeout_ms} ·
               idle_timeout_ms={provider.idle_timeout_ms}
             </Text>

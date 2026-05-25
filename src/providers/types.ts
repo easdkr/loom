@@ -1,4 +1,5 @@
 export type ProviderInputMode = "append-arg" | "stdin";
+export type ProviderDisplayMode = "agent" | "terminal";
 
 export interface ProviderConfig {
   name: string;
@@ -8,6 +9,7 @@ export interface ProviderConfig {
   env: Record<string, string>;
   completion_pattern: string;
   input_mode: ProviderInputMode;
+  display_mode?: ProviderDisplayMode;
   cols: number;
   rows: number;
   completion_timeout_ms: number;
@@ -47,6 +49,13 @@ export interface PtyTaskRequest {
 export interface PtyDataPayload {
   node_id: string;
   chunk: string;
+}
+
+export interface PtyAgentPayload {
+  node_id: string;
+  assistant_content: string;
+  activity?: string | null;
+  lines: string[];
 }
 
 export interface PtyCompletePayload {

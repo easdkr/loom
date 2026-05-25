@@ -3,8 +3,12 @@ use super::{
     completion::{
         BoundedBuffer, CompletionDetector, DetectionKind, ErrorClass, DEFAULT_TAIL_WINDOW_BYTES,
     },
-    providers::{validate_provider_for_execution, ProviderConfig, ProviderInputMode},
+    providers::{
+        validate_provider_for_execution, ProviderConfig, ProviderDisplayMode, ProviderInputMode,
+    },
+    renderer::HeadlessAgentRenderer,
     text::normalize_display_text,
+    transcript::extract_agent_transcript,
     utf8::Utf8StreamDecoder,
 };
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
@@ -38,6 +42,14 @@ pub struct PtyTask {
 pub struct PtyDataPayload {
     pub node_id: String,
     pub chunk: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PtyAgentPayload {
+    pub node_id: String,
+    pub assistant_content: String,
+    pub activity: Option<String>,
+    pub lines: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -225,10 +237,14 @@ impl PtyManager {
             DEFAULT_TAIL_WINDOW_BYTES,
         );
         let mut buffer = BoundedBuffer::new(provider.effective_max_output_bytes());
+        let is_agent_display = provider.display_mode == Some(ProviderDisplayMode::Agent);
         let pty_size = normalize_pty_size(
             task.cols.unwrap_or(provider.cols),
             task.rows.unwrap_or(provider.rows),
         );
+        let mut agent_renderer =
+            is_agent_display.then(|| HeadlessAgentRenderer::new(pty_size.cols, pty_size.rows));
+        let mut latest_agent_content = String::new();
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(pty_size)
@@ -346,6 +362,20 @@ impl PtyManager {
                             chunk: chunk.clone(),
                         },
                     );
+                    if let Some(renderer) = agent_renderer.as_mut() {
+                        renderer.write_str(&chunk);
+                        let transcript = extract_agent_transcript(&renderer.snapshot().lines);
+                        latest_agent_content = transcript.assistant_content.clone();
+                        let _ = app.emit(
+                            "pty:agent",
+                            PtyAgentPayload {
+                                node_id: node_id.clone(),
+                                assistant_content: transcript.assistant_content,
+                                activity: transcript.activity,
+                                lines: transcript.lines,
+                            },
+                        );
+                    }
 
                     if let Some(detection) = detector.push(&chunk) {
                         match detection.kind {
@@ -433,11 +463,20 @@ impl PtyManager {
             .remove(&node_id);
 
         let raw_output = buffer.to_string_value();
+        if let Some(renderer) = agent_renderer.as_ref() {
+            latest_agent_content =
+                extract_agent_transcript(&renderer.snapshot().lines).assistant_content;
+        }
+        let result = if is_agent_display {
+            latest_agent_content.trim().to_string()
+        } else {
+            normalize_display_text(&strip_ansi(&raw_output))
+                .trim()
+                .to_string()
+        };
         Ok(PtyRunOutcome {
             node_id,
-            result: normalize_display_text(&strip_ansi(&raw_output))
-                .trim()
-                .to_string(),
+            result,
             completion_reason,
             exit_code,
             timed_out,
