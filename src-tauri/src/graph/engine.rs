@@ -347,12 +347,21 @@ fn merge_upstream_text(parts: &[(String, String)]) -> String {
 }
 
 fn emit_synthetic_outputs(app: &AppHandle, node_id: &str, body: &str) {
-    use crate::pty::manager::{PtyCompletePayload, PtyDataPayload};
+    use crate::pty::manager::{PtyAgentPayload, PtyCompletePayload, PtyDataPayload};
     let _ = app.emit(
         "pty:data",
         PtyDataPayload {
             node_id: node_id.to_string(),
             chunk: body.to_string(),
+        },
+    );
+    let _ = app.emit(
+        "pty:agent",
+        PtyAgentPayload {
+            node_id: node_id.to_string(),
+            assistant_content: body.to_string(),
+            activity: None,
+            lines: body.lines().map(str::to_string).collect(),
         },
     );
     let _ = app.emit(

@@ -11,6 +11,8 @@ const DEFAULT_COLS: u16 = 220;
 const DEFAULT_ROWS: u16 = 50;
 pub const DEFAULT_SETTLE_MS: u64 = 800;
 pub const DEFAULT_MAX_OUTPUT_BYTES: usize = 1024 * 1024;
+const LEGACY_AGENT_COMPLETION_PATTERN: &str = "(?m)(Task complete|Done|Finished|>\\s*$)";
+const AGENT_COMPLETION_PATTERN: &str = "(?m)(Task complete|Done|Finished|>\\s*$|^[\\s*✢✳✽✻✣✶✱✦✧✩✪✫⚡+·•◦°]*[A-Za-z][A-Za-z -]{1,40}(?:ed|ing)\\s+for\\s+(?:\\d+m\\s*)?\\d+s\\s*$)";
 
 pub const DEFAULT_PROVIDERS_TOML: &str = r#"[[providers]]
 name = "shell"
@@ -18,6 +20,7 @@ type = "pty"
 command = "/bin/zsh"
 args = ["-lc"]
 input_mode = "append-arg"
+display_mode = "terminal"
 completion_pattern = "(?m)^LOOM_EXIT:\\d+\\r?$"
 error_pattern = ""
 cols = 220
@@ -34,7 +37,8 @@ type = "pty"
 command = "claude"
 args = ["--permission-mode", "bypassPermissions"]
 input_mode = "append-arg"
-completion_pattern = "(?m)(Task complete|Done|Finished|>\\s*$)"
+display_mode = "agent"
+completion_pattern = "(?m)(Task complete|Done|Finished|>\\s*$|^[\\s*✢✳✽✻✣✶✱✦✧✩✪✫⚡+·•◦°]*[A-Za-z][A-Za-z -]{1,40}(?:ed|ing)\\s+for\\s+(?:\\d+m\\s*)?\\d+s\\s*$)"
 error_pattern = "(?i)(rate.?limit|429 too many|usage limit|quota exceeded|context length exceeded)"
 cols = 220
 rows = 50
@@ -48,9 +52,10 @@ env = { FORCE_COLOR = "0", NO_COLOR = "1", TERM = "xterm-256color" }
 name = "codex"
 type = "pty"
 command = "codex"
-args = ["exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "--color", "never"]
+args = []
 input_mode = "append-arg"
-completion_pattern = "(?m)(Task complete|Done|Finished)"
+display_mode = "agent"
+completion_pattern = "(?m)(Task complete|Done|Finished|>\\s*$|^[\\s*✢✳✽✻✣✶✱✦✧✩✪✫⚡+·•◦°]*[A-Za-z][A-Za-z -]{1,40}(?:ed|ing)\\s+for\\s+(?:\\d+m\\s*)?\\d+s\\s*$)"
 error_pattern = "(?i)(rate.?limit|429 too many|usage limit|quota exceeded|context length exceeded)"
 cols = 220
 rows = 50
@@ -66,7 +71,8 @@ type = "pty"
 command = "cursor-agent"
 args = []
 input_mode = "stdin"
-completion_pattern = "(?m)(Task complete|Done|Finished|>\\s*$)"
+display_mode = "agent"
+completion_pattern = "(?m)(Task complete|Done|Finished|>\\s*$|^[\\s*✢✳✽✻✣✶✱✦✧✩✪✫⚡+·•◦°]*[A-Za-z][A-Za-z -]{1,40}(?:ed|ing)\\s+for\\s+(?:\\d+m\\s*)?\\d+s\\s*$)"
 error_pattern = "(?i)(rate.?limit|429 too many|usage limit|quota exceeded|context length exceeded)"
 cols = 220
 rows = 50
@@ -86,6 +92,13 @@ pub enum ProviderInputMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProviderDisplayMode {
+    Agent,
+    Terminal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderConfig {
     pub name: String,
     #[serde(rename = "type")]
@@ -101,6 +114,8 @@ pub struct ProviderConfig {
     pub error_pattern: String,
     #[serde(default)]
     pub input_mode: ProviderInputMode,
+    #[serde(default)]
+    pub display_mode: Option<ProviderDisplayMode>,
     #[serde(default = "default_cols")]
     pub cols: u16,
     #[serde(default = "default_rows")]
@@ -283,11 +298,32 @@ pub fn validate_provider_for_execution(provider: &ProviderConfig) -> Result<(), 
         );
     }
 
+    if is_codex_exec_provider(provider) {
+        return Err(
+            "codex exec is forbidden for Loom PTY execution; use interactive codex instead"
+                .to_string(),
+        );
+    }
+
     Ok(())
 }
 
 fn parse_provider_toml(source: &str) -> Result<ProviderConfigFile, String> {
-    toml::from_str(source).map_err(|error| error.to_string())
+    let mut file: ProviderConfigFile = toml::from_str(source).map_err(|error| error.to_string())?;
+    for provider in &mut file.providers {
+        if provider.display_mode.is_none() {
+            provider.display_mode = Some(default_display_mode_for_provider(
+                &provider.name,
+                &provider.command,
+            ));
+        }
+        if matches!(provider.display_mode, Some(ProviderDisplayMode::Agent))
+            && provider.completion_pattern == LEGACY_AGENT_COMPLETION_PATTERN
+        {
+            provider.completion_pattern = AGENT_COMPLETION_PATTERN.to_string();
+        }
+    }
+    Ok(file)
 }
 
 fn is_claude_print_provider(provider: &ProviderConfig) -> bool {
@@ -304,12 +340,32 @@ fn is_claude_print_provider(provider: &ProviderConfig) -> bool {
             .any(|arg| matches!(arg.as_str(), "--print" | "-p"))
 }
 
+fn is_codex_exec_provider(provider: &ProviderConfig) -> bool {
+    let command = provider
+        .command
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(provider.command.as_str());
+
+    command == "codex" && provider.args.first().map(String::as_str) == Some("exec")
+}
+
+fn default_display_mode_for_provider(name: &str, command: &str) -> ProviderDisplayMode {
+    let identity = format!("{name} {command}").to_ascii_lowercase();
+    if identity.contains("claude") || identity.contains("codex") || identity.contains("cursor") {
+        ProviderDisplayMode::Agent
+    } else {
+        ProviderDisplayMode::Terminal
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         default_provider_configs, load_provider_configs_from_paths, providers_config_path,
-        validate_provider_for_execution, ProviderInputMode,
+        validate_provider_for_execution, ProviderDisplayMode, ProviderInputMode,
     };
+    use regex::Regex;
     use std::{
         fs,
         path::PathBuf,
@@ -339,6 +395,30 @@ mod tests {
             .unwrap();
 
         assert_eq!(shell.input_mode, ProviderInputMode::AppendArg);
+        assert_eq!(shell.display_mode, Some(ProviderDisplayMode::Terminal));
+    }
+
+    #[test]
+    fn providers_default_to_compatible_display_modes() {
+        let providers = default_provider_configs().unwrap();
+
+        let claude = providers
+            .iter()
+            .find(|provider| provider.name == "claude-code")
+            .unwrap();
+        assert_eq!(claude.display_mode, Some(ProviderDisplayMode::Agent));
+
+        let codex = providers
+            .iter()
+            .find(|provider| provider.name == "codex")
+            .unwrap();
+        assert_eq!(codex.display_mode, Some(ProviderDisplayMode::Agent));
+
+        let cursor = providers
+            .iter()
+            .find(|provider| provider.name == "cursor")
+            .unwrap();
+        assert_eq!(cursor.display_mode, Some(ProviderDisplayMode::Agent));
     }
 
     #[test]
@@ -362,6 +442,19 @@ mod tests {
     }
 
     #[test]
+    fn default_agent_completion_matches_elapsed_status_with_minutes() {
+        let claude = default_provider_configs()
+            .unwrap()
+            .into_iter()
+            .find(|provider| provider.name == "claude-code")
+            .unwrap();
+        let pattern = Regex::new(&claude.completion_pattern).unwrap();
+
+        assert!(pattern.is_match("* Cogitated for 1m 24s"));
+        assert!(pattern.is_match("✻ Crunching for 2s"));
+    }
+
+    #[test]
     fn rejects_claude_print_even_from_overrides() {
         let mut claude = default_provider_configs()
             .unwrap()
@@ -371,6 +464,32 @@ mod tests {
         claude.args = vec!["--print".to_string()];
 
         assert!(validate_provider_for_execution(&claude)
+            .unwrap_err()
+            .contains("forbidden"));
+    }
+
+    #[test]
+    fn default_codex_provider_never_uses_exec_mode() {
+        let codex = default_provider_configs()
+            .unwrap()
+            .into_iter()
+            .find(|provider| provider.name == "codex")
+            .unwrap();
+
+        assert!(!codex.args.iter().any(|arg| arg == "exec"));
+        validate_provider_for_execution(&codex).unwrap();
+    }
+
+    #[test]
+    fn rejects_codex_exec_even_from_overrides() {
+        let mut codex = default_provider_configs()
+            .unwrap()
+            .into_iter()
+            .find(|provider| provider.name == "codex")
+            .unwrap();
+        codex.args = vec!["exec".to_string(), "--sandbox".to_string()];
+
+        assert!(validate_provider_for_execution(&codex)
             .unwrap_err()
             .contains("forbidden"));
     }
@@ -433,6 +552,39 @@ mod tests {
         fs::remove_dir_all(root).expect("remove temp provider root");
     }
 
+    #[test]
+    fn legacy_agent_completion_pattern_is_upgraded_for_overrides() {
+        let root = temp_project_root("provider-legacy-completion");
+        let global_path = root.join("providers.toml");
+        let plugin_dir = root.join("plugins");
+        fs::create_dir_all(&plugin_dir).expect("create plugin dir");
+        fs::write(
+            &global_path,
+            r#"[[providers]]
+name = "claude-code"
+type = "pty"
+command = "claude"
+args = ["--permission-mode", "bypassPermissions"]
+input_mode = "append-arg"
+display_mode = "agent"
+completion_pattern = "(?m)(Task complete|Done|Finished|>\\s*$)"
+"#,
+        )
+        .expect("write legacy claude provider");
+
+        let claude =
+            load_provider_configs_from_paths(&global_path, &plugin_dir, None::<&std::path::Path>)
+                .expect("load providers")
+                .into_iter()
+                .find(|provider| provider.name == "claude-code")
+                .expect("claude provider");
+        let pattern = Regex::new(&claude.completion_pattern).unwrap();
+
+        assert!(pattern.is_match("* Cogitated for 1m 24s"));
+
+        fs::remove_dir_all(root).expect("remove temp provider root");
+    }
+
     fn provider_toml(name: &str, command: &str) -> String {
         format!(
             r#"[[providers]]
@@ -443,6 +595,69 @@ args = []
 input_mode = "stdin"
 "#
         )
+    }
+
+    #[test]
+    fn missing_display_mode_infers_provider_defaults() {
+        let shell = load_provider_configs_from_paths(
+            PathBuf::from("/definitely-missing-global.toml").as_path(),
+            PathBuf::from("/definitely-missing-plugins").as_path(),
+            None::<&std::path::Path>,
+        )
+        .unwrap()
+        .into_iter()
+        .find(|provider| provider.name == "shell")
+        .unwrap();
+
+        assert_eq!(shell.display_mode, Some(ProviderDisplayMode::Terminal));
+
+        let root = temp_project_root("provider-display-mode");
+        let global_path = root.join("providers.toml");
+        let plugin_dir = root.join("plugins");
+        fs::create_dir_all(&plugin_dir).expect("create plugin dir");
+        fs::write(
+            &global_path,
+            r#"[[providers]]
+name = "custom-codex"
+type = "pty"
+command = "codex"
+args = []
+input_mode = "stdin"
+"#,
+        )
+        .expect("write provider without display mode");
+
+        let provider =
+            load_provider_configs_from_paths(&global_path, &plugin_dir, None::<&std::path::Path>)
+                .expect("load providers")
+                .into_iter()
+                .find(|provider| provider.name == "custom-codex")
+                .expect("custom codex provider");
+
+        assert_eq!(provider.display_mode, Some(ProviderDisplayMode::Agent));
+
+        fs::write(
+            &global_path,
+            r#"[[providers]]
+name = "custom-claude"
+type = "pty"
+command = "claude"
+args = []
+input_mode = "stdin"
+"#,
+        )
+        .expect("write claude provider without display mode");
+
+        let provider =
+            load_provider_configs_from_paths(&global_path, &plugin_dir, None::<&std::path::Path>)
+                .expect("load providers")
+                .into_iter()
+                .find(|provider| provider.name == "custom-claude")
+                .expect("custom claude provider");
+
+        assert_eq!(provider.display_mode, Some(ProviderDisplayMode::Agent));
+
+        fs::remove_dir_all(root).expect("remove temp provider root");
     }
 
     fn temp_project_root(label: &str) -> PathBuf {

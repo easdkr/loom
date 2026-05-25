@@ -25,7 +25,7 @@ function PlanMode() {
   const activeProject = useWorkspaceStore((state) =>
     state.projects.find((project) => project.id === activeTabId),
   );
-  const { runPlan, cancelNode } = usePlanExecution();
+  const { runPlan, cancelNode, writeNodeInput, writeNodeControl } = usePlanExecution();
   const [message, setMessage] = useState("Ready");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -144,7 +144,11 @@ function PlanMode() {
           <div className="plan-canvas-graph">
             <GraphCanvas />
           </div>
-          <ExecutionDrawer onCancelNode={cancelNode} />
+          <ExecutionDrawer
+            onCancelNode={cancelNode}
+            onWriteNode={writeNodeInput}
+            onWriteNodeControl={writeNodeControl}
+          />
         </div>
       </Panel>
 

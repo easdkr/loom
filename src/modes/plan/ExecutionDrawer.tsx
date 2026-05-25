@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Badge, Button, type BadgeTone } from "@design/components";
-import TerminalOutput, { type TerminalOutputHandle } from "@modes/TerminalOutput";
+import { useEffect, useMemo, useState } from "react";
+import { Badge, type BadgeTone } from "@design/components";
+import AgentRunView from "@modes/AgentRunView";
 import { useExecutionStore, useGraphStore, type ExecutionStatus } from "@stores/index";
-import { subscribeToTerminal } from "./usePlanExecution";
 
 const STATUS_TONE: Record<ExecutionStatus, BadgeTone> = {
   idle: "neutral",
@@ -13,43 +12,17 @@ const STATUS_TONE: Record<ExecutionStatus, BadgeTone> = {
   skipped: "neutral",
 };
 
-interface NodeTerminalProps {
-  nodeId: string;
-}
-
-function NodeTerminal({ nodeId }: NodeTerminalProps) {
-  const terminalRef = useRef<TerminalOutputHandle | null>(null);
-  const bufferedOutput = useExecutionStore((state) => state.outputByNode[nodeId] ?? "");
-
-  useEffect(() => {
-    terminalRef.current?.reset();
-    if (bufferedOutput) {
-      terminalRef.current?.write(bufferedOutput);
-    }
-    const unsubscribe = subscribeToTerminal(nodeId, (chunk) => {
-      terminalRef.current?.write(chunk);
-    });
-    return () => {
-      unsubscribe();
-    };
-  }, [nodeId]);
-
-  return (
-    <TerminalOutput
-      ref={terminalRef}
-      active={false}
-      onInput={() => undefined}
-      onResize={() => undefined}
-    />
-  );
-}
-
 interface ExecutionDrawerProps {
   onCancelNode: (nodeId: string) => Promise<void>;
+  onWriteNode: (nodeId: string, input: string) => Promise<void>;
+  onWriteNodeControl: (nodeId: string, input: string) => Promise<void>;
 }
 
-function ExecutionDrawer({ onCancelNode }: ExecutionDrawerProps) {
+function ExecutionDrawer({ onCancelNode, onWriteNode, onWriteNodeControl }: ExecutionDrawerProps) {
   const perNode = useExecutionStore((state) => state.perNode);
+  const outputByNode = useExecutionStore((state) => state.outputByNode);
+  const transcriptByNode = useExecutionStore((state) => state.transcriptByNode);
+  const activityByNode = useExecutionStore((state) => state.activityByNode);
   const nodes = useGraphStore((state) => state.nodes);
   const [activeTab, setActiveTab] = useState<string | null>(null);
 
@@ -79,6 +52,10 @@ function ExecutionDrawer({ onCancelNode }: ExecutionDrawerProps) {
     return null;
   }
 
+  const active = activeTab ? tabs.find((tab) => tab.id === activeTab) : null;
+  const activeNode = active ? nodes.find((node) => node.id === active.id) : null;
+  const activeStatus = active?.exec.status ?? "idle";
+
   return (
     <aside className="plan-drawer">
       <div className="plan-drawer-tabs" role="tablist">
@@ -97,21 +74,23 @@ function ExecutionDrawer({ onCancelNode }: ExecutionDrawerProps) {
         ))}
       </div>
       <div className="plan-drawer-body">
-        {activeTab ? (
-          <>
-            <div className="plan-drawer-toolbar">
-              <span className="plan-drawer-meta">node: {activeTab}</span>
-              <Button
-                size="sm"
-                variant="danger"
-                onClick={() => onCancelNode(activeTab)}
-                disabled={perNode[activeTab]?.status !== "running"}
-              >
-                Kill
-              </Button>
-            </div>
-            <NodeTerminal nodeId={activeTab} />
-          </>
+        {active && activeNode ? (
+          <AgentRunView
+            nodeId={active.id}
+            provider={activeNode.provider}
+            status={activeStatus}
+            title={activeNode.meta.name}
+            subtitle={active.id}
+            messages={transcriptByNode[active.id] ?? []}
+            rawOutput={outputByNode[active.id] ?? ""}
+            activity={activityByNode[active.id]}
+            running={activeStatus === "running"}
+            meta={<span className="plan-drawer-meta">{activeNode.type}</span>}
+            onCancel={() => onCancelNode(active.id)}
+            onSubmitInput={(input) => onWriteNode(active.id, input)}
+            onSubmitControl={(input) => onWriteNodeControl(active.id, input)}
+            cancelDisabled={activeStatus !== "running"}
+          />
         ) : null}
       </div>
     </aside>
