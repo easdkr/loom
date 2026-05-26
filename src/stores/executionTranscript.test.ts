@@ -22,7 +22,7 @@ test("appendSystemMessage appends sanitized status text", () => {
   ]);
 });
 
-test("execution store keeps running agent output out of conversation messages", () => {
+test("execution store streams running agent output into conversation messages", () => {
   const projectId = "execution-agent-store";
   const store = getExecutionStore(projectId);
 
@@ -41,6 +41,12 @@ test("execution store keeps running agent output out of conversation messages", 
     assert.equal(state.activityByNode["node-1"], "* Thinking...(2s)");
     assert.deepEqual(state.transcriptByNode["node-1"], [
       { id: "user-0", role: "user", content: "Prompt", status: "complete" },
+      {
+        id: "assistant-1",
+        role: "assistant",
+        content: "Rust-rendered answer",
+        status: "running",
+      },
     ]);
   } finally {
     disposeExecutionStore(projectId);

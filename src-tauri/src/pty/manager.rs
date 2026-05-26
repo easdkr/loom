@@ -39,6 +39,8 @@ pub struct PtyTask {
     pub timeout_ms: Option<u64>,
     pub cols: Option<u16>,
     pub rows: Option<u16>,
+    #[serde(default)]
+    pub interactive: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -645,6 +647,16 @@ impl PtyManager {
                         if is_error {
                             exit_code = Some(1);
                             error_class = Some(ErrorClass::ProviderError);
+                            break;
+                        }
+                        if task.interactive {
+                            emit_croxy_activity(
+                                app,
+                                &node_id,
+                                &assistant_content,
+                                Some("Ready for follow-up".to_string()),
+                            );
+                            continue;
                         }
                         break;
                     }
@@ -879,6 +891,7 @@ mod tests {
             timeout_ms: None,
             cols: None,
             rows: None,
+            interactive: false,
         };
         let materialized = PromptMaterialization::new(&task, "large-prompt-test").unwrap();
         let path = materialized.path.clone().unwrap();

@@ -100,7 +100,7 @@ function createExecutionStore(): ExecutionStoreApi {
 
       const assistantContent = sanitizeTranscriptText(turn.assistantContent).trim();
       const isLatestTurn = index === session.turns.length - 1;
-      if (assistantContent && !(isLatestTurn && session.status === "running")) {
+      if (assistantContent) {
         messages.push({
           id: `assistant-${messages.length}`,
           role: "assistant",
