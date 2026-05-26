@@ -29,7 +29,9 @@ use crate::croxy::session::{ClaudeStatus, SessionController, SessionExit};
 use crate::croxy::stdin_reader::{
     MAX_STREAM_JSON_LINE_BYTES, StdinEvent, StdinReadConfig, parse_stdin_line,
 };
-use crate::croxy::transcript_events::{is_transcript_api_error, is_transcript_api_error_message};
+use crate::croxy::transcript_events::{
+    is_transcript_api_error, is_transcript_api_error_message, is_transcript_tool_result_user_event,
+};
 use crate::croxy::transcript_observer::TranscriptObserver;
 use anyhow::Result;
 use std::io::{BufRead, IsTerminal, Read};
@@ -38,6 +40,8 @@ use std::sync::Mutex;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
+
+const ACTIVE_TRANSCRIPT_INITIAL_READ_BYTES: u64 = 16 * 1024 * 1024;
 
 pub fn run(argv: impl IntoIterator<Item = String>) -> Result<i32> {
     run_with_runtime(argv, RuntimeHooks::real())
@@ -453,14 +457,20 @@ fn poll_pid_and_transcript(
         && observed_transcript_path.as_ref() != Some(&path)
     {
         *observed_transcript_path = Some(path.clone());
-        *transcript_observer = Some(TranscriptObserver::new(path));
+        *transcript_observer = Some(
+            TranscriptObserver::new(path)
+                .with_initial_read_bytes(ACTIVE_TRANSCRIPT_INITIAL_READ_BYTES),
+        );
     }
 
     let Some(observer) = transcript_observer.as_mut() else {
         return;
     };
     for event in observer.poll() {
-        if is_transcript_api_error(&event) || is_transcript_api_error_message(&event) {
+        if is_transcript_api_error(&event)
+            || is_transcript_api_error_message(&event)
+            || is_transcript_tool_result_user_event(&event)
+        {
             let _ = controller.handle_transcript_event(event);
         }
     }
@@ -528,7 +538,7 @@ fn handle_observation_event(
         let _ = controller.handle_status(ClaudeStatus::Busy, None);
     }
     let _ = controller.handle_observation(observation);
-    if sse_type.as_deref() == Some("message_stop") {
+    if sse_type.as_deref() == Some("message_stop") && !controller.is_waiting_for_tool_result() {
         let _ = controller.handle_status(ClaudeStatus::Idle, None);
     }
 }
@@ -647,6 +657,40 @@ mod tests {
         assert!(text.contains("\"type\":\"result\""));
         assert!(text.contains("\"is_error\":true"));
         assert!(text.contains("Authentication failed before startup"));
+    }
+
+    #[test]
+    fn tool_use_message_stop_does_not_complete_turn() {
+        let args = parse(&[
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+        ]);
+        let mut controller =
+            SessionController::new(args, BackendCapabilities::PROXY, MockPty, Vec::new());
+
+        for event in [
+            serde_json::json!({"type":"message_start","message":{"id":"m1","model":"test","content":[]}}),
+            serde_json::json!({"type":"content_block_delta","delta":{"type":"text_delta","text":"Checking first."}}),
+            serde_json::json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_01","name":"Bash","input":{}}}),
+            serde_json::json!({"type":"message_delta","delta":{"stop_reason":"tool_use"}}),
+            serde_json::json!({"type":"message_stop"}),
+        ] {
+            handle_observation_event(
+                &mut controller,
+                Observation::Sse(crate::croxy::backends::SseEvent {
+                    event: None,
+                    data: event.to_string(),
+                    parsed: Some(event),
+                }),
+            );
+        }
+
+        assert!(controller.is_turn_active());
+        let (_pty, output) = controller.into_parts();
+        let text = String::from_utf8(output).unwrap();
+        assert!(!text.contains(r#""type":"result""#));
     }
 
     #[test]

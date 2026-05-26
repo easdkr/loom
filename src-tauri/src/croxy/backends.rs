@@ -329,7 +329,7 @@ async fn handle_proxy_client(
 
     let mut request_info = ProxyRequestInfo {
         request_id,
-        observe: request.path.starts_with("/v1/messages"),
+        observe: is_messages_create_path(&request.path),
     };
     if request_info.observe
         && let Ok(body) = serde_json::from_slice::<Value>(&request.body)
@@ -421,7 +421,7 @@ async fn write_proxy_response(
         }
     }
 
-    let is_messages = request.path.starts_with("/v1/messages");
+    let is_messages = is_messages_create_path(&request.path);
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -618,6 +618,10 @@ async fn write_fixed_response(
 
 pub fn should_observe_messages_request(body: &Value) -> bool {
     !is_claude_session_title_request(body)
+}
+
+fn is_messages_create_path(path: &str) -> bool {
+    path == "/v1/messages" || path.starts_with("/v1/messages?")
 }
 
 fn is_claude_session_title_request(body: &Value) -> bool {
@@ -1005,6 +1009,55 @@ mod tests {
 
         assert!(response.contains("HTTP/1.1 200 OK"));
         assert!(response.contains(r#"{"title":"Short title"}"#));
+        assert!(observations.lock().unwrap().is_empty());
+        assert!(errors.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn local_proxy_allows_count_tokens_json_without_proxy_error() {
+        let upstream = spawn_test_upstream(
+            200,
+            "application/json",
+            br#"{"input_tokens":10389}"#.to_vec(),
+        )
+        .await;
+        let observations = Arc::new(Mutex::new(Vec::new()));
+        let captured_observations = Arc::clone(&observations);
+        let errors = Arc::new(Mutex::new(Vec::new()));
+        let captured_errors = Arc::clone(&errors);
+        let proxy = start_proxy(
+            ProxyCallbacks {
+                on_observation: Some(Arc::new(move |observation| {
+                    captured_observations.lock().unwrap().push(observation);
+                })),
+                on_proxy_error: Some(Arc::new(move |message| {
+                    captured_errors.lock().unwrap().push(message);
+                })),
+                ..ProxyCallbacks::default()
+            },
+            ProxyOptions {
+                upstream_base_url: upstream.base_url,
+                upstream_timeout: Duration::from_secs(5),
+            },
+        )
+        .await
+        .unwrap();
+
+        let response = send_proxy_request(
+            proxy.port(),
+            "/v1/messages/count_tokens",
+            json!({
+                "model": "claude-opus",
+                "messages": [{"role": "user", "content": "hello"}]
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .await;
+        proxy.stop().await;
+
+        assert!(response.contains("HTTP/1.1 200 OK"));
+        assert!(response.contains(r#"{"input_tokens":10389}"#));
         assert!(observations.lock().unwrap().is_empty());
         assert!(errors.lock().unwrap().is_empty());
     }

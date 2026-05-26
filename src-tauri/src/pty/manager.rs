@@ -574,6 +574,8 @@ impl PtyManager {
         let mut exit_code = Some(0);
         let mut timed_out = false;
         let mut error_class = None;
+        let mut empty_output_since: Option<Instant> = None;
+        let empty_output_grace = Duration::from_millis(provider.idle_timeout_ms);
 
         loop {
             match events.recv_timeout(Duration::from_millis(100)) {
@@ -602,6 +604,9 @@ impl PtyManager {
                     }
                     EngineEvent::AssistantTextDelta { text, .. } => {
                         assistant_content.push_str(&text);
+                        if !assistant_content.trim().is_empty() {
+                            empty_output_since = None;
+                        }
                         let _ = app.emit(
                             "pty:data",
                             PtyDataPayload {
@@ -635,6 +640,7 @@ impl PtyManager {
                         result = value;
                         if assistant_content.trim().is_empty() && !result.trim().is_empty() {
                             assistant_content = result.clone();
+                            empty_output_since = None;
                             let _ = app.emit(
                                 "pty:data",
                                 PtyDataPayload {
@@ -655,6 +661,16 @@ impl PtyManager {
                                 &node_id,
                                 &assistant_content,
                                 Some("Ready for follow-up".to_string()),
+                            );
+                            continue;
+                        }
+                        if croxy_output_is_empty(&assistant_content, &result) {
+                            empty_output_since.get_or_insert_with(Instant::now);
+                            emit_croxy_activity(
+                                app,
+                                &node_id,
+                                &assistant_content,
+                                Some("Waiting for assistant output".to_string()),
                             );
                             continue;
                         }
@@ -687,11 +703,29 @@ impl PtyManager {
                                     chunk: format!("{result}\n"),
                                 },
                             );
+                        } else if !task.interactive
+                            && croxy_output_is_empty(&assistant_content, &result)
+                        {
+                            empty_output_since.get_or_insert_with(Instant::now);
+                            emit_croxy_activity(
+                                app,
+                                &node_id,
+                                &assistant_content,
+                                Some("Waiting for assistant output".to_string()),
+                            );
+                            continue;
                         }
                         break;
                     }
                 },
                 Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if croxy_empty_output_grace_elapsed(empty_output_since, empty_output_grace) {
+                        completion_reason = "empty-output".to_string();
+                        error_class = Some(ErrorClass::ProviderError);
+                        result = "No assistant output captured from croxy before completion."
+                            .to_string();
+                        break;
+                    }
                     if started_at.elapsed() > timeout {
                         timed_out = true;
                         completion_reason = "timeout-fallback".to_string();
@@ -705,6 +739,13 @@ impl PtyManager {
                     error_class = Some(ErrorClass::ProviderError);
                     break;
                 }
+            }
+
+            if croxy_empty_output_grace_elapsed(empty_output_since, empty_output_grace) {
+                completion_reason = "empty-output".to_string();
+                error_class = Some(ErrorClass::ProviderError);
+                result = "No assistant output captured from croxy before completion.".to_string();
+                break;
             }
         }
 
@@ -735,6 +776,14 @@ impl PtyManager {
 
 fn is_croxy_provider(provider: &ProviderConfig) -> bool {
     provider.provider_type == "croxy"
+}
+
+fn croxy_output_is_empty(assistant_content: &str, result: &str) -> bool {
+    assistant_content.trim().is_empty() && result.trim().is_empty()
+}
+
+fn croxy_empty_output_grace_elapsed(empty_output_since: Option<Instant>, grace: Duration) -> bool {
+    empty_output_since.is_some_and(|since| since.elapsed() >= grace)
 }
 
 fn write_croxy_input(session: &ActiveCroxySession, input: &str) -> Result<(), String> {
@@ -869,7 +918,10 @@ fn generate_node_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{INLINE_PROMPT_BYTE_LIMIT, PromptMaterialization, prompt_for_provider};
+    use super::{
+        INLINE_PROMPT_BYTE_LIMIT, PromptMaterialization, croxy_empty_output_grace_elapsed,
+        croxy_output_is_empty, prompt_for_provider,
+    };
     use crate::pty::providers::{ProviderInputMode, default_provider_configs};
     use crate::pty::text::normalize_display_text;
     use crate::pty::utf8::Utf8StreamDecoder;
@@ -892,6 +944,28 @@ mod tests {
 
         assert!(prompt.contains("LOOM_EXIT"));
         assert_eq!(shell.input_mode, ProviderInputMode::AppendArg);
+    }
+
+    #[test]
+    fn croxy_empty_output_requires_both_result_and_assistant_to_be_empty() {
+        assert!(croxy_output_is_empty("", ""));
+        assert!(croxy_output_is_empty("  ", "\n"));
+        assert!(!croxy_output_is_empty("assistant text", ""));
+        assert!(!croxy_output_is_empty("", "result text"));
+    }
+
+    #[test]
+    fn croxy_empty_output_grace_waits_before_failing() {
+        let grace = Duration::from_millis(10);
+        assert!(!croxy_empty_output_grace_elapsed(None, grace));
+        assert!(!croxy_empty_output_grace_elapsed(
+            Some(Instant::now()),
+            grace
+        ));
+        assert!(croxy_empty_output_grace_elapsed(
+            Some(Instant::now() - Duration::from_millis(11)),
+            grace
+        ));
     }
 
     #[test]
