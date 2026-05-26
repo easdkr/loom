@@ -14,7 +14,7 @@ import {
   type NodeChange,
   useReactFlow,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@xyflow/react/dist/style.css";
 
 import { useExecutionStore, useGraphStore, type GraphEdge } from "@stores/index";
@@ -25,6 +25,7 @@ import { PALETTE, type PaletteEntry } from "./node-catalog";
 const nodeTypes = { agent: AgentFlowNode };
 
 type FlowNode = Node<AgentFlowNodeData, "agent">;
+type NodePosition = { x: number; y: number };
 
 let quickNodeCounter = 0;
 
@@ -47,6 +48,21 @@ function nodeId(type: string): string {
   return `${slug}-${Date.now().toString(36)}-${quickNodeCounter}`;
 }
 
+function gridPosition(index: number, firstRowY = 120): NodePosition {
+  return {
+    x: 80 + (index % 3) * 320,
+    y: firstRowY + Math.floor(index / 3) * 220,
+  };
+}
+
+function isUsablePosition(position: unknown): position is NodePosition {
+  if (!position || typeof position !== "object") {
+    return false;
+  }
+  const candidate = position as Partial<NodePosition>;
+  return Number.isFinite(candidate.x) && Number.isFinite(candidate.y);
+}
+
 function GraphCanvasInner() {
   const graphNodes = useGraphStore((state) => state.nodes);
   const graphEdges = useGraphStore((state) => state.edges);
@@ -56,14 +72,17 @@ function GraphCanvasInner() {
   const selectNode = useGraphStore((state) => state.selectNode);
   const perNode = useExecutionStore((state) => state.perNode);
   const { fitView } = useReactFlow();
-  const lastFittedNodeKey = useRef("");
+  const hasAutoFitRef = useRef(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
 
   const flowNodes = useMemo<FlowNode[]>(
     () =>
-      graphNodes.map((node) => ({
+      graphNodes.map((node, index) => ({
         id: node.id,
         type: "agent",
-        position: node.position,
+        position: isUsablePosition(node.position) ? node.position : gridPosition(index),
+        initialWidth: 280,
+        initialHeight: 120,
         data: {
           type: node.type,
           meta: node.meta,
@@ -80,45 +99,49 @@ function GraphCanvasInner() {
 
   useEffect(() => {
     if (flowNodes.length === 0) {
+      hasAutoFitRef.current = false;
       return;
     }
-
-    const nodeKey = flowNodes
-      .map((node) => `${node.id}:${node.position.x}:${node.position.y}`)
-      .join("|");
-    if (lastFittedNodeKey.current === nodeKey) {
+    if (hasAutoFitRef.current) {
       return;
     }
-
-    lastFittedNodeKey.current = nodeKey;
+    hasAutoFitRef.current = true;
     const fit = () => {
-      void fitView({ padding: 0.2, duration: 200 });
+      void fitView({ padding: 0.25, duration: 200 });
     };
-    requestAnimationFrame(fit);
+    const raf = requestAnimationFrame(fit);
     const retry = window.setTimeout(fit, 250);
-    return () => window.clearTimeout(retry);
-  }, [fitView, flowNodes]);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(retry);
+    };
+  }, [fitView, flowNodes.length]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<FlowNode>[]) => {
-      const next = applyNodeChanges<FlowNode>(changes, flowNodes);
-      setNodes(
-        next.map((flow) => {
-          const existing = graphNodes.find((n) => n.id === flow.id);
-          if (!existing) {
-            return {
-              id: flow.id,
-              type: flow.data.type,
-              meta: flow.data.meta,
-              provider: flow.data.provider,
-              prompt: flow.data.prompt,
-              skipped: flow.data.skipped,
-              position: flow.position,
-            };
-          }
-          return { ...existing, position: flow.position };
-        }),
+      const positional = changes.filter(
+        (change) => change.type === "position" || change.type === "remove",
       );
+      if (positional.length > 0) {
+        const next = applyNodeChanges<FlowNode>(positional, flowNodes);
+        setNodes(
+          next.map((flow) => {
+            const existing = graphNodes.find((n) => n.id === flow.id);
+            if (!existing) {
+              return {
+                id: flow.id,
+                type: flow.data.type,
+                meta: flow.data.meta,
+                provider: flow.data.provider,
+                prompt: flow.data.prompt,
+                skipped: flow.data.skipped,
+                position: flow.position,
+              };
+            }
+            return { ...existing, position: flow.position };
+          }),
+        );
+      }
 
       for (const change of changes) {
         if (change.type === "remove") {
@@ -173,8 +196,7 @@ function GraphCanvasInner() {
         provider: entry.defaultProvider,
         prompt: entry.defaultPrompt,
         position: {
-          x: 80 + (index % 3) * 320,
-          y: 80 + Math.floor(index / 3) * 220,
+          ...gridPosition(index, 80),
         },
       });
       selectNode(id);
@@ -193,10 +215,7 @@ function GraphCanvasInner() {
       meta: { ...entry.meta },
       provider: entry.defaultProvider,
       prompt: entry.defaultPrompt,
-      position: {
-        x: 80 + index * 320,
-        y: 120,
-      },
+      position: gridPosition(index),
     }));
     setNodes(nodes);
     setEdges(
@@ -213,21 +232,26 @@ function GraphCanvasInner() {
     setNodes(
       graphNodes.map((node, index) => ({
         ...node,
-        position: {
-          x: 80 + (index % 3) * 320,
-          y: 120 + Math.floor(index / 3) * 220,
-        },
+        position: gridPosition(index),
       })),
     );
     selectNode(graphNodes[0]?.id ?? null);
-    window.setTimeout(() => {
-      void fitView({ padding: 0.2, duration: 200 });
-    }, 0);
+    requestAnimationFrame(() => {
+      void fitView({ padding: 0.25, duration: 200 });
+    });
   }, [fitView, graphNodes, selectNode, setNodes]);
 
   const fitGraph = useCallback(() => {
     void fitView({ padding: 0.2, duration: 200 });
   }, [fitView]);
+
+  const handleAddNode = useCallback(
+    (entry: PaletteEntry) => {
+      addNode(entry);
+      setAddMenuOpen(false);
+    },
+    [addNode],
+  );
 
   return (
     <div className="plan-graph-surface">
@@ -236,6 +260,33 @@ function GraphCanvasInner() {
           {graphNodes.length} node{graphNodes.length === 1 ? "" : "s"} · {graphEdges.length} edge
           {graphEdges.length === 1 ? "" : "s"}
         </span>
+        <div className="plan-add-node">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setAddMenuOpen((open) => !open)}
+            aria-expanded={addMenuOpen}
+            aria-haspopup="menu"
+          >
+            + Add node
+          </Button>
+          {addMenuOpen ? (
+            <div className="plan-add-node-menu" role="menu" aria-label="Add graph node">
+              {PALETTE.map((entry) => (
+                <button
+                  key={entry.type}
+                  type="button"
+                  className="plan-add-node-option"
+                  role="menuitem"
+                  onClick={() => handleAddNode(entry)}
+                >
+                  <span className="plan-add-node-name">{entry.meta.name}</span>
+                  <span className="plan-add-node-type">{entry.type}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
         <Button variant="ghost" size="sm" onClick={fitGraph} disabled={graphNodes.length === 0}>
           Fit
         </Button>
@@ -254,11 +305,7 @@ function GraphCanvasInner() {
         onEdgesChange={handleEdgesChange}
         onConnect={handleConnect}
         onPaneClick={() => selectNode(null)}
-        onInit={() => {
-          requestAnimationFrame(() => {
-            void fitView({ padding: 0.2, duration: 0 });
-          });
-        }}
+        connectionRadius={40}
         fitView
         proOptions={{ hideAttribution: true }}
       >
@@ -270,7 +317,7 @@ function GraphCanvasInner() {
         <div className="plan-graph-empty">
           <div className="plan-graph-empty-title">No graph nodes</div>
           <div className="plan-graph-empty-copy">
-            Add nodes from here or use the left palette, then connect handles to build the run order.
+            Add a node to start the run graph.
           </div>
           <div className="plan-graph-empty-actions">
             {PALETTE.slice(0, 3).map((entry, index) => (
