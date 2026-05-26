@@ -29,6 +29,7 @@ function PlanMode() {
   const [message, setMessage] = useState("Ready");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [swapNodeId, setSwapNodeId] = useState<string | null>(null);
 
   const handleRun = useCallback(async () => {
@@ -78,7 +79,7 @@ function PlanMode() {
   const running = activeNodeIds.length > 0;
 
   return (
-    <section className="mode-layout mode-layout--plan">
+    <section className="mode-layout mode-layout--plan" data-inspector-open={inspectorOpen}>
       <Panel
         className="mode-sidebar"
         title="Palette"
@@ -126,6 +127,13 @@ function PlanMode() {
               disabled={nodeCount === 0}
             >
               Review
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setInspectorOpen((open) => !open)}
+            >
+              Inspector
             </Button>
             <Button
               size="sm"

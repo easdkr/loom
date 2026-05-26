@@ -665,6 +665,13 @@ impl PtyManager {
                         exit_code = Some(1);
                         error_class = Some(ErrorClass::ProviderError);
                         completion_reason = "croxy-error".to_string();
+                        let _ = app.emit(
+                            "pty:data",
+                            PtyDataPayload {
+                                node_id: node_id.clone(),
+                                chunk: format!("{result}\n"),
+                            },
+                        );
                         break;
                     }
                     EngineEvent::Exited { code, .. } => {
@@ -673,6 +680,13 @@ impl PtyManager {
                             result = format!("croxy engine exited with code {code}");
                             error_class = Some(ErrorClass::ProviderError);
                             completion_reason = "croxy-exit".to_string();
+                            let _ = app.emit(
+                                "pty:data",
+                                PtyDataPayload {
+                                    node_id: node_id.clone(),
+                                    chunk: format!("{result}\n"),
+                                },
+                            );
                         }
                         break;
                     }

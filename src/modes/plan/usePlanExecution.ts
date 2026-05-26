@@ -126,6 +126,9 @@ export function ExecutionEventBridge() {
         }
         const failed =
           timed_out || (exit_code !== null && exit_code !== 0) || Boolean(error_class);
+        const statusText = `${completion_reason} - exit ${exit_code ?? "n/a"}`;
+        const resultText = event.payload.result?.trim();
+        const displayText = failed && resultText ? resultText : statusText;
         const store = getExecutionStore(projectId).getState();
         store.setStatus(localId, {
           status: failed ? "error" : "complete",
@@ -135,10 +138,11 @@ export function ExecutionEventBridge() {
           truncated: Boolean(truncated),
           errorClass: error_class ?? null,
         });
-        store.completeTranscript(
-          localId,
-          `${completion_reason} - exit ${exit_code ?? "n/a"}`,
-        );
+        if (failed) {
+          store.failTranscript(localId, displayText);
+        } else {
+          store.completeTranscript(localId, statusText);
+        }
         removeActive(projectId, localId);
       }),
       listen<PtyErrorPayload>("pty:error", (event) => {

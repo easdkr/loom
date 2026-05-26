@@ -46,7 +46,7 @@ function singleNodePlan(
   providers: ProviderConfig[],
   preferred: string | undefined,
 ): PlanDraft {
-  const provider = pickProvider(providers, preferred, "claude-code");
+  const provider = pickProvider(providers, preferred, "croxy");
   const nodes: PlanDraftNode[] = [
     {
       id: nodeId("node", 0),
@@ -68,9 +68,9 @@ function defaultPlan(
   providers: ProviderConfig[],
   preferred: string | undefined,
 ): PlanDraft {
-  const designer = pickProvider(providers, preferred, "claude-code");
+  const designer = pickProvider(providers, preferred, "croxy");
   const implementer = pickProvider(providers, undefined, "codex");
-  const reviewer = pickProvider(providers, undefined, "claude-code");
+  const reviewer = pickProvider(providers, undefined, "croxy");
 
   const nodes: PlanDraftNode[] = [
     {
@@ -103,7 +103,7 @@ function defaultPlan(
 
 function reviewPipelinePlan(origin: string, providers: ProviderConfig[]): PlanDraft {
   const implementer = pickProvider(providers, undefined, "codex");
-  const reviewer = pickProvider(providers, undefined, "claude-code");
+  const reviewer = pickProvider(providers, undefined, "croxy");
   const tester = pickProvider(providers, undefined, "shell");
 
   const nodes: PlanDraftNode[] = [

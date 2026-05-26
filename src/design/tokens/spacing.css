@@ -44,7 +44,11 @@
 
   /* Panel geometry */
   --panel-width-default: 360px;
-  --panel-width-min: 280px;
+  --panel-width-min: 240px;
+  --panel-width-compact: 300px;
   --panel-width-max: 560px;
   --statusbar-height: 28px;
+
+  /* Breakpoints */
+  --breakpoint-narrow: 960px;
 }

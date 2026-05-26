@@ -43,6 +43,16 @@ function providerDisplayMode(provider: ProviderConfig | undefined): DisplayMode 
   return provider ? defaultDisplayModeForProvider(provider) : "terminal";
 }
 
+function defaultSingleProvider(providers: ProviderConfig[]): string {
+  const preferred = ["croxy", "codex", "cursor", "claude-code"];
+  return (
+    preferred.find((name) => providers.some((provider) => provider.name === name)) ??
+    providers.find((provider) => providerDisplayMode(provider) === "agent")?.name ??
+    providers[0]?.name ??
+    "shell"
+  );
+}
+
 function SingleMode() {
   const setMode = useSettingsStore((state) => state.setMode);
   const activeProjectId = useWorkspaceStore((state) => state.activeTabId);
@@ -51,8 +61,11 @@ function SingleMode() {
   const selectNode = useGraphStore((state) => state.selectNode);
   const [providers, setProviders] = useState<ProviderConfig[]>(fallbackProviders);
   const [configPath, setConfigPath] = useState("~/.loom/providers.toml");
-  const [selectedProvider, setSelectedProvider] = useState("shell");
-  const [prompt, setPrompt] = useState("echo hello from loom");
+  const [selectedProvider, setSelectedProvider] = useState(() =>
+    defaultSingleProvider(fallbackProviders),
+  );
+  const [command, setCommand] = useState("echo hello from loom");
+  const [lastPrompt, setLastPrompt] = useState("");
   const [workdir, setWorkdir] = useState("");
   const [stdin, setStdin] = useState("");
   const [status, setStatus] = useState<RunStatus>("idle");
@@ -84,8 +97,13 @@ function SingleMode() {
 
         setProviders(response.providers);
         setConfigPath(response.config_path);
-        if (!response.providers.some((provider) => provider.name === selectedProvider)) {
-          setSelectedProvider(response.providers[0]?.name ?? "shell");
+        if (
+          selectedProvider === "claude-code" &&
+          response.providers.some((provider) => provider.name === "croxy")
+        ) {
+          setSelectedProvider("croxy");
+        } else if (!response.providers.some((provider) => provider.name === selectedProvider)) {
+          setSelectedProvider(defaultSingleProvider(response.providers));
         }
       })
       .catch((error) => {
@@ -141,9 +159,12 @@ function SingleMode() {
           (event.payload.exit_code !== null && event.payload.exit_code !== 0) ||
           Boolean(event.payload.error_class);
         setStatus(failed ? "error" : "complete");
-        setMessage(
-          `${event.payload.completion_reason} - exit ${event.payload.exit_code ?? "n/a"}`,
-        );
+        const statusText = `${event.payload.completion_reason} - exit ${
+          event.payload.exit_code ?? "n/a"
+        }`;
+        const resultText = event.payload.result?.trim();
+        const displayText = failed && resultText ? resultText : statusText;
+        setMessage(displayText);
         const { projectId, localId } = splitProjectScopedId(event.payload.node_id);
         if (projectId) {
           const store = getExecutionStore(projectId).getState();
@@ -156,10 +177,11 @@ function SingleMode() {
             errorClass: event.payload.error_class ?? null,
           });
           store.setActive([]);
-          store.completeTranscript(
-            localId,
-            `${event.payload.completion_reason} - exit ${event.payload.exit_code ?? "n/a"}`,
-          );
+          if (failed) {
+            store.failTranscript(localId, displayText);
+          } else {
+            store.completeTranscript(localId, statusText);
+          }
         }
         activeNodeIdRef.current = null;
         activeFullNodeIdRef.current = null;
@@ -226,10 +248,14 @@ function SingleMode() {
     visibleNodeId ? state.activityByNode[visibleNodeId] : undefined,
   );
 
-  const canRun = status !== "running" && prompt.trim().length > 0 && Boolean(provider);
+  const canRunCommand = status !== "running" && command.trim().length > 0 && Boolean(provider);
 
-  async function runTask() {
-    if (!provider || !canRun) {
+  async function runTask(input: string = command) {
+    if (!provider || status === "running") {
+      return;
+    }
+    const prompt = input.trim();
+    if (!prompt) {
       return;
     }
     if (!activeProject) {
@@ -257,6 +283,7 @@ function SingleMode() {
     activeNodeIdRef.current = nodeId;
     activeFullNodeIdRef.current = fullNodeId;
     const store = getExecutionStore(activeProject.id).getState();
+    setLastPrompt(prompt);
     store.beginRun(fullNodeId, [nodeId]);
     store.beginTranscript(nodeId, prompt);
     store.setStatus(nodeId, {
@@ -308,8 +335,12 @@ function SingleMode() {
     }
   }
 
-  async function writeAgentInput(input: string) {
-    if (!activeNodeIdRef.current || input.length === 0) {
+  async function submitAgentInput(input: string) {
+    if (input.trim().length === 0) {
+      return;
+    }
+    if (!activeNodeIdRef.current) {
+      await runTask(input);
       return;
     }
 
@@ -402,7 +433,7 @@ function SingleMode() {
         colorToken: "node/worker",
       },
       provider: provider.name,
-      prompt,
+      prompt: lastPrompt,
       workdir: workdir.trim() || null,
       position: { x: 60, y: 60 },
     });
@@ -448,7 +479,7 @@ function SingleMode() {
       <section className="single-layout">
         <aside className="single-sidebar" aria-label="Single mode controls">
           <label className="field">
-            <span>Provider</span>
+            <span>Agent</span>
             <select
               value={provider?.name ?? ""}
               onChange={(event) => setSelectedProvider(event.target.value)}
@@ -461,13 +492,15 @@ function SingleMode() {
             </select>
           </label>
 
-          <div className="provider-meta">
-            <span>{provider?.command}</span>
-            <code>{configPath}</code>
-          </div>
+          {displayMode === "terminal" ? (
+            <div className="provider-meta">
+              <span>{provider?.command}</span>
+              <code>{configPath}</code>
+            </div>
+          ) : null}
 
           <label className="field">
-            <span>Workdir</span>
+            <span>Workspace</span>
             <div className="inline-input inline-input--workdir">
               <input
                 value={workdir}
@@ -484,25 +517,33 @@ function SingleMode() {
             </div>
           </label>
 
-          <label className="field field-grow">
-            <span>Prompt</span>
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              spellCheck={false}
-            />
-          </label>
+          {displayMode === "terminal" ? (
+            <>
+              <label className="field field-grow">
+                <span>Command</span>
+                <textarea
+                  value={command}
+                  onChange={(event) => setCommand(event.target.value)}
+                  spellCheck={false}
+                />
+              </label>
 
-          <div className="button-row">
-            <button className="primary-button" disabled={!canRun} onClick={runTask}>
-              Run
-            </button>
-            <button disabled={status !== "running"} onClick={killTask}>
-              Kill
-            </button>
-          </div>
+              <div className="button-row">
+                <button
+                  className="primary-button"
+                  disabled={!canRunCommand}
+                  onClick={() => runTask()}
+                >
+                  Run
+                </button>
+                <button disabled={status !== "running"} onClick={killTask}>
+                  Kill
+                </button>
+              </div>
+            </>
+          ) : null}
 
-          {(status === "complete" || status === "error") && prompt.trim() ? (
+          {(status === "complete" || status === "error") && lastPrompt.trim() ? (
             <Button variant="ghost" size="sm" onClick={continueInPlan}>
               Continue in Plan →
             </Button>
@@ -528,8 +569,8 @@ function SingleMode() {
         {displayMode === "terminal" ? (
           <section className="terminal-panel" aria-label="PTY output">
             <div className="terminal-header">
-              <span>{visibleNodeId ?? "single-ready"}</span>
-              <span>{provider?.input_mode}</span>
+              <span>Output</span>
+              <span>{provider?.name ?? "provider"}</span>
             </div>
             <TerminalOutput
               ref={terminalRef}
@@ -540,16 +581,20 @@ function SingleMode() {
           </section>
         ) : (
           <AgentRunView
-            nodeId={visibleNodeId ?? "single-ready"}
+            nodeId="single-run"
             provider={provider?.name ?? "unknown"}
             status={status}
-            title={visibleNodeId ?? "Single run"}
-            subtitle={provider?.input_mode ?? "provider"}
+            title="Output"
+            subtitle={provider?.name ?? "provider"}
             messages={visibleMessages}
             rawOutput={visibleOutput}
             activity={visibleActivity}
             running={status === "running"}
-            onSubmitInput={writeAgentInput}
+            footerMeta={`${provider?.name ?? "provider"} · raw output available in Raw`}
+            composerPlaceholder="Type a message to start a session..."
+            idleSubmitLabel="Start"
+            allowIdleSubmit={status !== "running"}
+            onSubmitInput={submitAgentInput}
             onSubmitControl={writeAgentControl}
             onCancel={killTask}
             cancelDisabled={status !== "running"}

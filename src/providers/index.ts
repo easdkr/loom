@@ -11,6 +11,7 @@ export function defaultDisplayModeForProvider(
   const identity = `${provider.name} ${provider.command}`.toLowerCase();
   if (
     identity.includes("claude") ||
+    identity.includes("croxy") ||
     identity.includes("codex") ||
     identity.includes("cursor")
   ) {
@@ -38,9 +39,9 @@ export const fallbackProviders: ProviderConfig[] = [
     max_output_bytes: 1048576,
   },
   {
-    name: "claude-code",
+    name: "croxy",
     type: "croxy",
-    command: "claude",
+    command: "croxy",
     args: ["--permission-mode", "bypassPermissions"],
     env: { FORCE_COLOR: "0", NO_COLOR: "1", TERM: "xterm-256color" },
     completion_pattern: AGENT_COMPLETION_PATTERN,
