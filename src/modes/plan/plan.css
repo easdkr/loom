@@ -211,8 +211,90 @@
 }
 
 .plan-canvas-graph {
+  width: 100%;
+  height: 100%;
   min-height: 0;
   position: relative;
+  overflow: hidden;
+  background: var(--bg-canvas);
+}
+
+.plan-graph-surface {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.plan-graph-surface .react-flow {
+  width: 100%;
+  height: 100%;
+}
+
+.plan-graph-toolbar {
+  position: absolute;
+  left: var(--space-3);
+  top: var(--space-3);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: calc(100% - var(--space-6));
+  padding: var(--space-1);
+  border: var(--border-width-default) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.plan-graph-count {
+  min-width: 0;
+  padding-inline: var(--space-2);
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  white-space: nowrap;
+}
+
+.plan-graph-empty {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 5;
+  width: min(100% - var(--space-8), calc(var(--space-12) * 8));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: var(--border-width-default) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  transform: translate(-50%, -50%);
+}
+
+.plan-graph-empty-title {
+  color: var(--fg-primary);
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: var(--weight-medium);
+}
+
+.plan-graph-empty-copy {
+  max-width: calc(var(--space-12) * 7);
+  color: var(--fg-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  text-align: center;
+}
+
+.plan-graph-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
 }
 
 .plan-drawer {
