@@ -14,6 +14,13 @@
   width: 100%;
   text-align: left;
   padding: var(--space-2) var(--space-3);
+  border-color: var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.plan-palette-item:not(:disabled):hover {
+  border-color: var(--accent-default);
+  background: var(--bg-elevated);
 }
 
 .plan-palette-name {
@@ -236,7 +243,7 @@
   position: absolute;
   left: var(--space-3);
   top: var(--space-3);
-  z-index: 6;
+  z-index: 8;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -257,11 +264,64 @@
   white-space: nowrap;
 }
 
+.plan-add-node {
+  position: relative;
+}
+
+.plan-add-node-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + var(--space-1));
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: calc(var(--space-12) * 5);
+  padding: var(--space-1);
+  border: var(--border-width-default) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: 0 var(--space-2) var(--space-6) var(--bg-canvas);
+}
+
+.plan-add-node-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-height: var(--space-10);
+  padding: var(--space-2);
+  border: var(--border-width-default) solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-primary);
+  font: inherit;
+  text-align: left;
+}
+
+.plan-add-node-option:hover {
+  border-color: var(--border-default);
+  background: var(--bg-elevated);
+}
+
+.plan-add-node-name {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  font-weight: var(--weight-medium);
+}
+
+.plan-add-node-type {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
 .plan-graph-empty {
   position: absolute;
   left: 50%;
   top: 50%;
-  z-index: 5;
+  z-index: 7;
   width: min(100% - var(--space-8), calc(var(--space-12) * 8));
   display: flex;
   flex-direction: column;
@@ -399,8 +459,8 @@
 }
 
 .react-flow__edge-path {
-  stroke: var(--border-strong);
-  stroke-width: 1.5;
+  stroke: var(--fg-secondary);
+  stroke-width: 2;
 }
 
 .react-flow__edge.selected .react-flow__edge-path,
@@ -409,13 +469,38 @@
 }
 
 .react-flow__handle {
-  width: 8px;
-  height: 8px;
+  width: 12px;
+  height: 12px;
   background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
+  border: 1.5px solid var(--border-strong);
+  cursor: crosshair;
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
-.react-flow__handle:hover {
+.react-flow__handle::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
+
+.react-flow__handle:hover,
+.react-flow__handle.connectingfrom {
   background: var(--accent-default);
   border-color: var(--accent-default);
+  transform: translate(var(--xy-handle-tx, -50%), -50%) scale(1.25);
+}
+
+.react-flow__handle-right:hover,
+.react-flow__handle-right.connectingfrom {
+  --xy-handle-tx: 50%;
+}
+
+.react-flow__handle-left:hover,
+.react-flow__handle-left.connectingfrom {
+  --xy-handle-tx: -50%;
+}
+
+.react-flow__connection-path {
+  stroke: var(--accent-default);
+  stroke-width: 2;
 }
