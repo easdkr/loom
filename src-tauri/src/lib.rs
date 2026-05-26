@@ -1,3 +1,4 @@
+mod croxy;
 mod graph;
 mod pty;
 mod review;
@@ -8,15 +9,15 @@ use graph::{engine::execute_plan_background, types::ExecutionPlan};
 use pty::{
     manager::{PtyManager, PtyTask},
     providers::{
-        find_provider, load_provider_configs_with_override, providers_config_path, ProviderConfig,
+        ProviderConfig, find_provider, load_provider_configs_with_override, providers_config_path,
     },
 };
 use review::{HumanReviewDecision, HumanReviewRegistry};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use templates::{
-    delete_template, list_templates, load_template, save_template, TemplatePayload,
-    TemplatesResponse,
+    TemplatePayload, TemplatesResponse, delete_template, list_templates, load_template,
+    save_template,
 };
 use workspace::{
     load_project_graph, load_workspace, normalize_project_root as canonicalize_project_root,

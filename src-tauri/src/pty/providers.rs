@@ -33,7 +33,7 @@ env = { FORCE_COLOR = "0", NO_COLOR = "1", TERM = "xterm-256color" }
 
 [[providers]]
 name = "claude-code"
-type = "pty"
+type = "croxy"
 command = "claude"
 args = ["--permission-mode", "bypassPermissions"]
 input_mode = "append-arg"
@@ -226,6 +226,7 @@ fn load_provider_configs_from_paths(
     if let Some(path) = override_path {
         merge_providers_from_path(&mut providers, path)?;
     }
+    normalize_provider_engines(&mut providers);
 
     Ok(providers)
 }
@@ -259,6 +260,15 @@ fn merge_providers_from_path(
     }
 
     Ok(())
+}
+
+fn normalize_provider_engines(providers: &mut [ProviderConfig]) {
+    for provider in providers {
+        if provider.name == "claude-code" && provider.command == "claude" {
+            provider.provider_type = "croxy".to_string();
+            provider.display_mode = Some(ProviderDisplayMode::Agent);
+        }
+    }
 }
 
 fn load_plugin_providers_from_dir(dir: &Path) -> Result<Vec<ProviderConfig>, String> {
@@ -362,8 +372,8 @@ fn default_display_mode_for_provider(name: &str, command: &str) -> ProviderDispl
 #[cfg(test)]
 mod tests {
     use super::{
-        default_provider_configs, load_provider_configs_from_paths, providers_config_path,
-        validate_provider_for_execution, ProviderDisplayMode, ProviderInputMode,
+        ProviderDisplayMode, ProviderInputMode, default_provider_configs,
+        load_provider_configs_from_paths, providers_config_path, validate_provider_for_execution,
     };
     use regex::Regex;
     use std::{
@@ -463,9 +473,11 @@ mod tests {
             .unwrap();
         claude.args = vec!["--print".to_string()];
 
-        assert!(validate_provider_for_execution(&claude)
-            .unwrap_err()
-            .contains("forbidden"));
+        assert!(
+            validate_provider_for_execution(&claude)
+                .unwrap_err()
+                .contains("forbidden")
+        );
     }
 
     #[test]
@@ -489,9 +501,11 @@ mod tests {
             .unwrap();
         codex.args = vec!["exec".to_string(), "--sandbox".to_string()];
 
-        assert!(validate_provider_for_execution(&codex)
-            .unwrap_err()
-            .contains("forbidden"));
+        assert!(
+            validate_provider_for_execution(&codex)
+                .unwrap_err()
+                .contains("forbidden")
+        );
     }
 
     #[test]
@@ -580,6 +594,8 @@ completion_pattern = "(?m)(Task complete|Done|Finished|>\\s*$)"
                 .expect("claude provider");
         let pattern = Regex::new(&claude.completion_pattern).unwrap();
 
+        assert_eq!(claude.provider_type, "croxy");
+        assert_eq!(claude.display_mode, Some(ProviderDisplayMode::Agent));
         assert!(pattern.is_match("* Cogitated for 1m 24s"));
 
         fs::remove_dir_all(root).expect("remove temp provider root");

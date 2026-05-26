@@ -39,7 +39,7 @@ export const fallbackProviders: ProviderConfig[] = [
   },
   {
     name: "claude-code",
-    type: "pty",
+    type: "croxy",
     command: "claude",
     args: ["--permission-mode", "bypassPermissions"],
     env: { FORCE_COLOR: "0", NO_COLOR: "1", TERM: "xterm-256color" },

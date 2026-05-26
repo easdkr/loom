@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
 };
 
 #[derive(Debug, Clone)]

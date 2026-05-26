@@ -1,17 +1,20 @@
 use super::{
     ansi::strip_ansi,
     completion::{
-        BoundedBuffer, CompletionDetector, DetectionKind, ErrorClass, DEFAULT_TAIL_WINDOW_BYTES,
+        BoundedBuffer, CompletionDetector, DEFAULT_TAIL_WINDOW_BYTES, DetectionKind, ErrorClass,
     },
     providers::{
-        validate_provider_for_execution, ProviderConfig, ProviderDisplayMode, ProviderInputMode,
+        ProviderConfig, ProviderDisplayMode, ProviderInputMode, validate_provider_for_execution,
     },
     renderer::HeadlessAgentRenderer,
     text::normalize_display_text,
     transcript::extract_agent_transcript,
     utf8::Utf8StreamDecoder,
 };
-use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use crate::croxy::engine::{
+    EngineCommand, EngineConfig, EngineEvent, EngineManager, EngineSessionHandle,
+};
+use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -19,7 +22,7 @@ use std::{
     fs,
     io::{Read, Write},
     path::PathBuf,
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -92,9 +95,19 @@ struct ActiveSession {
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
 }
 
+#[derive(Clone)]
+struct ActiveCroxySession {
+    handle: EngineSessionHandle,
+}
+
+enum ActiveNodeSession {
+    Pty(ActiveSession),
+    Croxy(ActiveCroxySession),
+}
+
 #[derive(Clone, Default)]
 pub struct PtyManager {
-    active: Arc<Mutex<HashMap<String, ActiveSession>>>,
+    active: Arc<Mutex<HashMap<String, ActiveNodeSession>>>,
 }
 
 enum ReaderEvent {
@@ -171,15 +184,20 @@ impl PtyManager {
         let session = active
             .get(node_id)
             .ok_or_else(|| format!("node is not running: {node_id}"))?;
-        let mut writer = session
-            .writer
-            .lock()
-            .map_err(|_| format!("failed to lock writer for node: {node_id}"))?;
+        match session {
+            ActiveNodeSession::Pty(session) => {
+                let mut writer = session
+                    .writer
+                    .lock()
+                    .map_err(|_| format!("failed to lock writer for node: {node_id}"))?;
 
-        writer
-            .write_all(input.as_bytes())
-            .and_then(|_| writer.flush())
-            .map_err(|error| format!("failed to write to node {node_id}: {error}"))
+                writer
+                    .write_all(input.as_bytes())
+                    .and_then(|_| writer.flush())
+                    .map_err(|error| format!("failed to write to node {node_id}: {error}"))
+            }
+            ActiveNodeSession::Croxy(session) => write_croxy_input(session, input),
+        }
     }
 
     pub fn kill(&self, node_id: &str) -> Result<(), String> {
@@ -190,14 +208,22 @@ impl PtyManager {
         let session = active
             .get(node_id)
             .ok_or_else(|| format!("node is not running: {node_id}"))?;
-        let mut killer = session
-            .killer
-            .lock()
-            .map_err(|_| format!("failed to lock killer for node: {node_id}"))?;
+        match session {
+            ActiveNodeSession::Pty(session) => {
+                let mut killer = session
+                    .killer
+                    .lock()
+                    .map_err(|_| format!("failed to lock killer for node: {node_id}"))?;
 
-        killer
-            .kill()
-            .map_err(|error| format!("failed to kill node {node_id}: {error}"))
+                killer
+                    .kill()
+                    .map_err(|error| format!("failed to kill node {node_id}: {error}"))
+            }
+            ActiveNodeSession::Croxy(session) => session
+                .handle
+                .send(EngineCommand::Shutdown)
+                .map_err(|error| format!("failed to kill node {node_id}: {error}")),
+        }
     }
 
     pub fn resize(&self, node_id: &str, cols: u16, rows: u16) -> Result<(), String> {
@@ -209,14 +235,19 @@ impl PtyManager {
         let session = active
             .get(node_id)
             .ok_or_else(|| format!("node is not running: {node_id}"))?;
-        let master = session
-            .master
-            .lock()
-            .map_err(|_| format!("failed to lock PTY master for node: {node_id}"))?;
+        match session {
+            ActiveNodeSession::Pty(session) => {
+                let master = session
+                    .master
+                    .lock()
+                    .map_err(|_| format!("failed to lock PTY master for node: {node_id}"))?;
 
-        master
-            .resize(size)
-            .map_err(|error| format!("failed to resize node {node_id}: {error}"))
+                master
+                    .resize(size)
+                    .map_err(|error| format!("failed to resize node {node_id}: {error}"))
+            }
+            ActiveNodeSession::Croxy(_) => Ok(()),
+        }
     }
 
     fn run_blocking_inner(
@@ -227,6 +258,10 @@ impl PtyManager {
         node_id: String,
     ) -> Result<PtyRunOutcome, String> {
         validate_provider_for_execution(&provider)?;
+        if is_croxy_provider(&provider) {
+            return self.run_croxy_blocking_inner(app, provider, task, node_id);
+        }
+
         let completion_pattern =
             compile_pattern(&provider.completion_pattern, "completion", &provider.name)?;
         let error_pattern = compile_pattern(&provider.error_pattern, "error", &provider.name)?;
@@ -294,11 +329,11 @@ impl PtyManager {
             .map_err(|_| "failed to lock PTY sessions".to_string())?
             .insert(
                 node_id.clone(),
-                ActiveSession {
+                ActiveNodeSession::Pty(ActiveSession {
                     master: Arc::clone(&master),
                     writer: Arc::clone(&writer),
                     killer: Arc::clone(&killer),
-                },
+                }),
             );
 
         if provider.input_mode == ProviderInputMode::Stdin {
@@ -484,6 +519,232 @@ impl PtyManager {
             error_class,
         })
     }
+
+    fn run_croxy_blocking_inner(
+        &self,
+        app: &AppHandle,
+        provider: ProviderConfig,
+        task: PtyTask,
+        node_id: String,
+    ) -> Result<PtyRunOutcome, String> {
+        let cwd = task
+            .workdir
+            .as_deref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let manager = EngineManager::new();
+        let handle = manager
+            .spawn(EngineConfig {
+                cwd,
+                claude_args: provider.args.clone(),
+                max_turns: None,
+                replay_user_messages: true,
+                include_partial: true,
+            })
+            .map_err(|error| format!("failed to start croxy engine: {error}"))?;
+        let events = handle.events();
+
+        self.active
+            .lock()
+            .map_err(|_| "failed to lock PTY sessions".to_string())?
+            .insert(
+                node_id.clone(),
+                ActiveNodeSession::Croxy(ActiveCroxySession {
+                    handle: handle.clone(),
+                }),
+            );
+
+        if let Err(error) = handle.send(EngineCommand::Prompt(task.prompt.clone())) {
+            let _ = self
+                .active
+                .lock()
+                .map_err(|_| "failed to lock PTY sessions".to_string())?
+                .remove(&node_id);
+            return Err(format!("failed to send prompt to croxy engine: {error}"));
+        }
+
+        let timeout =
+            Duration::from_millis(task.timeout_ms.unwrap_or(provider.completion_timeout_ms));
+        let started_at = Instant::now();
+        let mut assistant_content = String::new();
+        let mut result = String::new();
+        let mut completion_reason = "croxy-result".to_string();
+        let mut exit_code = Some(0);
+        let mut timed_out = false;
+        let mut error_class = None;
+
+        loop {
+            match events.recv_timeout(Duration::from_millis(100)) {
+                Ok(event) => match event {
+                    EngineEvent::Started {
+                        claude_session_id,
+                        model,
+                        ..
+                    } => {
+                        emit_croxy_activity(
+                            app,
+                            &node_id,
+                            &assistant_content,
+                            Some(format!("Claude {model} session {claude_session_id}")),
+                        );
+                    }
+                    EngineEvent::StatusChanged {
+                        status,
+                        waiting_for,
+                        ..
+                    } => {
+                        let activity = waiting_for
+                            .map(|value| format!("{status}: {value}"))
+                            .unwrap_or(status);
+                        emit_croxy_activity(app, &node_id, &assistant_content, Some(activity));
+                    }
+                    EngineEvent::AssistantTextDelta { text, .. } => {
+                        assistant_content.push_str(&text);
+                        let _ = app.emit(
+                            "pty:data",
+                            PtyDataPayload {
+                                node_id: node_id.clone(),
+                                chunk: text,
+                            },
+                        );
+                        emit_croxy_activity(app, &node_id, &assistant_content, None);
+                    }
+                    EngineEvent::ToolUse { name, .. } => {
+                        emit_croxy_activity(
+                            app,
+                            &node_id,
+                            &assistant_content,
+                            Some(format!("Using {name}")),
+                        );
+                    }
+                    EngineEvent::PermissionRequest { tool_name, .. } => {
+                        emit_croxy_activity(
+                            app,
+                            &node_id,
+                            &assistant_content,
+                            Some(format!("Waiting for permission: {tool_name}")),
+                        );
+                    }
+                    EngineEvent::Result {
+                        is_error,
+                        result: value,
+                        ..
+                    } => {
+                        result = value;
+                        if assistant_content.trim().is_empty() && !result.trim().is_empty() {
+                            assistant_content = result.clone();
+                            let _ = app.emit(
+                                "pty:data",
+                                PtyDataPayload {
+                                    node_id: node_id.clone(),
+                                    chunk: result.clone(),
+                                },
+                            );
+                            emit_croxy_activity(app, &node_id, &assistant_content, None);
+                        }
+                        if is_error {
+                            exit_code = Some(1);
+                            error_class = Some(ErrorClass::ProviderError);
+                        }
+                        break;
+                    }
+                    EngineEvent::Error { message, .. } => {
+                        result = message;
+                        exit_code = Some(1);
+                        error_class = Some(ErrorClass::ProviderError);
+                        completion_reason = "croxy-error".to_string();
+                        break;
+                    }
+                    EngineEvent::Exited { code, .. } => {
+                        exit_code = Some(code);
+                        if code != 0 {
+                            result = format!("croxy engine exited with code {code}");
+                            error_class = Some(ErrorClass::ProviderError);
+                            completion_reason = "croxy-exit".to_string();
+                        }
+                        break;
+                    }
+                },
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if started_at.elapsed() > timeout {
+                        timed_out = true;
+                        completion_reason = "timeout-fallback".to_string();
+                        let _ = handle.send(EngineCommand::Shutdown);
+                        break;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    completion_reason = "croxy-disconnected".to_string();
+                    exit_code = Some(1);
+                    error_class = Some(ErrorClass::ProviderError);
+                    break;
+                }
+            }
+        }
+
+        let _ = handle.send(EngineCommand::Shutdown);
+        let _ = self
+            .active
+            .lock()
+            .map_err(|_| "failed to lock PTY sessions".to_string())?
+            .remove(&node_id);
+
+        let result = if result.trim().is_empty() {
+            assistant_content.trim().to_string()
+        } else {
+            result.trim().to_string()
+        };
+
+        Ok(PtyRunOutcome {
+            node_id,
+            result,
+            completion_reason,
+            exit_code: exit_code.and_then(|code| u32::try_from(code).ok()),
+            timed_out,
+            truncated: false,
+            error_class,
+        })
+    }
+}
+
+fn is_croxy_provider(provider: &ProviderConfig) -> bool {
+    provider.provider_type == "croxy"
+}
+
+fn write_croxy_input(session: &ActiveCroxySession, input: &str) -> Result<(), String> {
+    if input == "\u{1b}" {
+        return session
+            .handle
+            .send(EngineCommand::Interrupt)
+            .map_err(|error| format!("failed to interrupt croxy engine: {error}"));
+    }
+
+    let prompt = input.trim_matches(['\r', '\n']);
+    if prompt.is_empty() || prompt.starts_with('\u{1b}') {
+        return Ok(());
+    }
+
+    session
+        .handle
+        .send(EngineCommand::Prompt(prompt.to_string()))
+        .map_err(|error| format!("failed to write to croxy engine: {error}"))
+}
+
+fn emit_croxy_activity(
+    app: &AppHandle,
+    node_id: &str,
+    assistant_content: &str,
+    activity: Option<String>,
+) {
+    let _ = app.emit(
+        "pty:agent",
+        PtyAgentPayload {
+            node_id: node_id.to_string(),
+            assistant_content: assistant_content.to_string(),
+            activity,
+            lines: assistant_content.lines().map(str::to_string).collect(),
+        },
+    );
 }
 
 fn compile_pattern(
@@ -582,11 +843,11 @@ fn generate_node_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{prompt_for_provider, PromptMaterialization, INLINE_PROMPT_BYTE_LIMIT};
-    use crate::pty::providers::{default_provider_configs, ProviderInputMode};
+    use super::{INLINE_PROMPT_BYTE_LIMIT, PromptMaterialization, prompt_for_provider};
+    use crate::pty::providers::{ProviderInputMode, default_provider_configs};
     use crate::pty::text::normalize_display_text;
     use crate::pty::utf8::Utf8StreamDecoder;
-    use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
     use regex::Regex;
     use std::{
         io::Read,
@@ -622,9 +883,11 @@ mod tests {
         let materialized = PromptMaterialization::new(&task, "large-prompt-test").unwrap();
         let path = materialized.path.clone().unwrap();
 
-        assert!(materialized
-            .prompt
-            .contains(path.to_string_lossy().as_ref()));
+        assert!(
+            materialized
+                .prompt
+                .contains(path.to_string_lossy().as_ref())
+        );
         assert!(path.exists());
         drop(materialized);
         assert!(!path.exists());

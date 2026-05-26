@@ -3,7 +3,7 @@ export type ProviderDisplayMode = "agent" | "terminal";
 
 export interface ProviderConfig {
   name: string;
-  type: "pty" | (string & {});
+  type: "pty" | "croxy" | (string & {});
   command: string;
   args: string[];
   env: Record<string, string>;
