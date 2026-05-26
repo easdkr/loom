@@ -44,6 +44,7 @@ export interface PtyTaskRequest {
   timeout_ms?: number | null;
   cols?: number | null;
   rows?: number | null;
+  interactive?: boolean;
 }
 
 export interface PtyDataPayload {

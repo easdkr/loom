@@ -295,6 +295,7 @@ fn run_pty_node(
         timeout_ms: node.timeout_ms,
         cols: None,
         rows: None,
+        interactive: false,
     };
 
     let outcome = pty_manager.run_blocking(app, provider, task)?;

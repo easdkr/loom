@@ -249,6 +249,7 @@ function SingleMode() {
       timeout_ms: null,
       cols: terminalSizeRef.current?.cols ?? provider.cols,
       rows: terminalSizeRef.current?.rows ?? provider.rows,
+      interactive: provider.type === "croxy" && displayMode === "agent",
     };
 
     setActiveNodeId(nodeId);
