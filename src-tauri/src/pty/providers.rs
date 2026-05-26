@@ -32,9 +32,9 @@ max_output_bytes = 1048576
 env = { FORCE_COLOR = "0", NO_COLOR = "1", TERM = "xterm-256color" }
 
 [[providers]]
-name = "claude-code"
+name = "croxy"
 type = "croxy"
-command = "claude"
+command = "croxy"
 args = ["--permission-mode", "bypassPermissions"]
 input_mode = "append-arg"
 display_mode = "agent"
@@ -362,7 +362,11 @@ fn is_codex_exec_provider(provider: &ProviderConfig) -> bool {
 
 fn default_display_mode_for_provider(name: &str, command: &str) -> ProviderDisplayMode {
     let identity = format!("{name} {command}").to_ascii_lowercase();
-    if identity.contains("claude") || identity.contains("codex") || identity.contains("cursor") {
+    if identity.contains("croxy")
+        || identity.contains("claude")
+        || identity.contains("codex")
+        || identity.contains("cursor")
+    {
         ProviderDisplayMode::Agent
     } else {
         ProviderDisplayMode::Terminal
@@ -391,7 +395,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(names.contains(&"shell".to_string()));
-        assert!(names.contains(&"claude-code".to_string()));
+        assert!(names.contains(&"croxy".to_string()));
         assert!(names.contains(&"codex".to_string()));
         assert!(names.contains(&"cursor".to_string()));
     }
@@ -412,11 +416,11 @@ mod tests {
     fn providers_default_to_compatible_display_modes() {
         let providers = default_provider_configs().unwrap();
 
-        let claude = providers
+        let croxy = providers
             .iter()
-            .find(|provider| provider.name == "claude-code")
+            .find(|provider| provider.name == "croxy")
             .unwrap();
-        assert_eq!(claude.display_mode, Some(ProviderDisplayMode::Agent));
+        assert_eq!(croxy.display_mode, Some(ProviderDisplayMode::Agent));
 
         let codex = providers
             .iter()
@@ -437,28 +441,30 @@ mod tests {
     }
 
     #[test]
-    fn default_claude_provider_never_uses_print_mode() {
-        let claude = default_provider_configs()
+    fn default_croxy_provider_never_uses_print_mode() {
+        let croxy = default_provider_configs()
             .unwrap()
             .into_iter()
-            .find(|provider| provider.name == "claude-code")
+            .find(|provider| provider.name == "croxy")
             .unwrap();
 
-        assert!(!claude.args.contains(&"--print".to_string()));
-        assert!(!claude.args.contains(&"-p".to_string()));
-        assert!(claude.args.contains(&"--permission-mode".to_string()));
-        assert!(claude.args.contains(&"bypassPermissions".to_string()));
-        validate_provider_for_execution(&claude).unwrap();
+        assert_eq!(croxy.provider_type, "croxy");
+        assert_eq!(croxy.command, "croxy");
+        assert!(!croxy.args.contains(&"--print".to_string()));
+        assert!(!croxy.args.contains(&"-p".to_string()));
+        assert!(croxy.args.contains(&"--permission-mode".to_string()));
+        assert!(croxy.args.contains(&"bypassPermissions".to_string()));
+        validate_provider_for_execution(&croxy).unwrap();
     }
 
     #[test]
     fn default_agent_completion_matches_elapsed_status_with_minutes() {
-        let claude = default_provider_configs()
+        let croxy = default_provider_configs()
             .unwrap()
             .into_iter()
-            .find(|provider| provider.name == "claude-code")
+            .find(|provider| provider.name == "croxy")
             .unwrap();
-        let pattern = Regex::new(&claude.completion_pattern).unwrap();
+        let pattern = Regex::new(&croxy.completion_pattern).unwrap();
 
         assert!(pattern.is_match("* Cogitated for 1m 24s"));
         assert!(pattern.is_match("✻ Crunching for 2s"));
@@ -469,8 +475,10 @@ mod tests {
         let mut claude = default_provider_configs()
             .unwrap()
             .into_iter()
-            .find(|provider| provider.name == "claude-code")
+            .find(|provider| provider.name == "croxy")
             .unwrap();
+        claude.name = "claude-code".to_string();
+        claude.command = "claude".to_string();
         claude.args = vec!["--print".to_string()];
 
         assert!(

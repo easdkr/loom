@@ -72,7 +72,7 @@ export function generateAutoPlan(
         id: nodeId("auto", 0),
         type: "worker:pty",
         meta: WORKER_META("Single Worker"),
-        provider: pick("claude-code"),
+        provider: pick("croxy"),
         prompt: trimmed,
         position: gridPosition(0),
       },
@@ -86,7 +86,7 @@ export function generateAutoPlan(
 
   if (template === "review-pipeline") {
     const implementer = pick("codex");
-    const reviewer = pick("claude-code");
+    const reviewer = pick("croxy");
     const tester = pick("shell");
     const nodes: GraphNode[] = [
       {
@@ -122,9 +122,9 @@ export function generateAutoPlan(
   }
 
   // default: design → implement → review (linear)
-  const designer = pick("claude-code");
+  const designer = pick("croxy");
   const implementer = pick("codex");
-  const reviewer = pick("claude-code");
+  const reviewer = pick("croxy");
   const nodes: GraphNode[] = [
     {
       id: nodeId("auto", 0),

@@ -201,7 +201,7 @@ const REVIEW_PIPELINE_JSON: &str = r#"{
       "id": "tpl-review",
       "type": "reviewer:llm",
       "meta": { "name": "LLM Reviewer", "category": "reviewer", "colorToken": "node/reviewer" },
-      "provider": "claude-code",
+      "provider": "croxy",
       "prompt": "방금 변경된 부분을 리뷰하고, 보안·테스트 누락을 지적하세요.",
       "position": { "x": 480, "y": 80 }
     },
@@ -235,7 +235,7 @@ const FAN_OUT_JSON: &str = r#"{
       "id": "tpl-b",
       "type": "worker:pty",
       "meta": { "name": "Worker B", "category": "worker", "colorToken": "node/worker" },
-      "provider": "claude-code",
+      "provider": "croxy",
       "prompt": "B 경로를 구현하세요.",
       "position": { "x": 80, "y": 320 }
     },
@@ -261,7 +261,7 @@ const HUMAN_GATE_JSON: &str = r#"{
       "id": "tpl-worker",
       "type": "worker:pty",
       "meta": { "name": "Worker", "category": "worker", "colorToken": "node/worker" },
-      "provider": "claude-code",
+      "provider": "croxy",
       "prompt": "변경 사항을 준비하세요.",
       "position": { "x": 80, "y": 80 }
     },

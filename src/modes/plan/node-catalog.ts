@@ -16,7 +16,7 @@ export const PALETTE: PaletteEntry[] = [
       colorToken: "node/worker",
       icon: "terminal",
     },
-    defaultProvider: "claude-code",
+    defaultProvider: "croxy",
     defaultPrompt: "작업 내용을 적습니다.",
   },
   {
@@ -60,7 +60,7 @@ export const PALETTE: PaletteEntry[] = [
       colorToken: "node/reviewer",
       icon: "search",
     },
-    defaultProvider: "claude-code",
+    defaultProvider: "croxy",
     defaultPrompt: "결과물을 리뷰합니다. 문제점과 개선안을 정리하세요.",
   },
   {

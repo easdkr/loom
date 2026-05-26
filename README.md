@@ -78,7 +78,7 @@ loom/
 │   └── PRD.md         # 제품 기획서 (소스 오브 트루스)
 ├── src/               # React 프론트엔드
 │   ├── core/          # AgentNode, TaskGraph 등 코어 타입
-│   ├── providers/     # Provider 어댑터 (claude-code, codex, ...)
+│   ├── providers/     # Provider 어댑터 (croxy, codex, ...)
 │   ├── design/        # 디자인 토큰 + 컴포넌트
 │   └── modes/         # Single / Plan / Auto 모드 UI
 ├── src-tauri/         # Rust 코어

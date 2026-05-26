@@ -278,6 +278,7 @@ where
     let mut observed_transcript_path = None;
     let mut transcript_observer = None;
     let mut emitted_transcript_init = false;
+    let mut recent_pty_text = String::new();
 
     if args.output_format == OutputFormat::StreamJson {
         let session_id = fallback_session_id(pty_pid);
@@ -317,6 +318,7 @@ where
                 let text = strip_terminal_controls(&data);
                 if !text.trim().is_empty() {
                     tracing::debug!(pty = %text.trim(), "claude PTY");
+                    append_recent_pty_text(&mut recent_pty_text, &text);
                 }
                 if trust_detector.push(&data) {
                     if auto_trust {
@@ -332,6 +334,15 @@ where
                 }
             }
             RuntimeEvent::ClaudeExit(code) => {
+                if code != 0 {
+                    let message = recent_pty_text.trim();
+                    if !message.is_empty() {
+                        let _ = controller.emit_process_error_result(
+                            &format!("croxy backend exited with code {code}:\n{message}"),
+                            code,
+                        );
+                    }
+                }
                 let _ = controller.handle_claude_exit(code);
                 exit_code = if controller.is_turn_active() && code != 0 {
                     code
@@ -363,6 +374,22 @@ where
     }
 
     exit_code
+}
+
+const RECENT_PTY_TEXT_LIMIT: usize = 16 * 1024;
+
+fn append_recent_pty_text(buffer: &mut String, text: &str) {
+    buffer.push_str(text);
+    if buffer.len() <= RECENT_PTY_TEXT_LIMIT {
+        return;
+    }
+    let keep_from = buffer
+        .char_indices()
+        .rev()
+        .map(|(index, _)| index)
+        .find(|index| buffer.len() - *index >= RECENT_PTY_TEXT_LIMIT)
+        .unwrap_or(0);
+    buffer.drain(..keep_from);
 }
 
 pub(crate) fn start_startup_ready_timer(sender: RuntimeSender) {
@@ -576,6 +603,50 @@ mod tests {
             Some("http://127.0.0.1:3456")
         );
         assert_eq!(command.cwd, args.cwd);
+    }
+
+    #[test]
+    fn build_claude_command_keeps_croxy_formats_out_of_claude_args() {
+        let args = parse(&[
+            "-p",
+            "--input-format",
+            "stream-json",
+            "--output-format=stream-json",
+            "--include-partial-messages",
+            "--replay-user-messages",
+            "--permission-mode",
+            "bypassPermissions",
+        ]);
+
+        let command = build_claude_command(&args, 3456);
+
+        assert_eq!(command.args, vec!["--permission-mode", "bypassPermissions"]);
+    }
+
+    #[test]
+    fn nonzero_startup_exit_emits_recent_pty_output_as_error_result() {
+        let args = parse(&[
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+        ]);
+        let (tx, rx) = mpsc::channel();
+        tx.send(RuntimeEvent::PtyData(
+            "Authentication failed before startup\n".to_string(),
+        ))
+        .unwrap();
+        tx.send(RuntimeEvent::ClaudeExit(1)).unwrap();
+        drop(tx);
+
+        let mut output = Vec::new();
+        let code = run_event_loop_with_writer(args, MockPty, rx, &mut output);
+
+        assert_eq!(code, 1);
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains("\"type\":\"result\""));
+        assert!(text.contains("\"is_error\":true"));
+        assert!(text.contains("Authentication failed before startup"));
     }
 
     #[test]

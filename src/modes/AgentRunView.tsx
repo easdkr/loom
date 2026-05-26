@@ -20,6 +20,10 @@ interface AgentRunViewProps {
   title?: string;
   subtitle?: string;
   meta?: ReactNode;
+  footerMeta?: ReactNode;
+  composerPlaceholder?: string;
+  idleSubmitLabel?: string;
+  allowIdleSubmit?: boolean;
   className?: string;
   onSubmitInput?: (input: string) => void | Promise<void>;
   onSubmitControl?: (input: string) => void | Promise<void>;
@@ -68,6 +72,10 @@ function AgentRunView({
   title,
   subtitle,
   meta,
+  footerMeta,
+  composerPlaceholder,
+  idleSubmitLabel = "Start",
+  allowIdleSubmit = false,
   className,
   onSubmitInput,
   onSubmitControl,
@@ -76,7 +84,8 @@ function AgentRunView({
 }: AgentRunViewProps) {
   const [activeTab, setActiveTab] = useState<AgentRunTab>("conversation");
   const [input, setInput] = useState("");
-  const canSubmit = running && Boolean(onSubmitInput) && input.trim().length > 0;
+  const canSubmit =
+    Boolean(onSubmitInput) && input.trim().length > 0 && (running || allowIdleSubmit);
   const canSubmitControl = running && Boolean(onSubmitControl);
   const rawLineCount = useMemo(
     () => (rawOutput.length === 0 ? 0 : rawOutput.split(/\r?\n/).length),
@@ -85,11 +94,14 @@ function AgentRunView({
   const displayRawOutput = useMemo(() => sanitizeTranscriptText(rawOutput), [rawOutput]);
 
   async function submitComposerText() {
-    if (!running) {
+    if (!running && !allowIdleSubmit) {
       return;
     }
     const value = input;
     setInput("");
+    if (!running && value.trim().length === 0) {
+      return;
+    }
     if (value.trim().length > 0 && onSubmitInput) {
       await onSubmitInput(value);
       return;
@@ -111,7 +123,7 @@ function AgentRunView({
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (!running) {
+    if (!running && !allowIdleSubmit) {
       return;
     }
     if (event.key === "Enter" && !event.shiftKey) {
@@ -148,7 +160,7 @@ function AgentRunView({
         <div className="agent-run-header-actions">
           {meta}
           <Badge tone={STATUS_TONE[status]}>{statusLabel(status)}</Badge>
-          {onCancel ? (
+          {onCancel && running ? (
             <Button
               size="sm"
               variant="danger"
@@ -220,19 +232,24 @@ function AgentRunView({
 
       <footer className="agent-run-footer">
         <span className="agent-run-footnote">
-          node {nodeId} · {provider} · raw lines {rawLineCount}
+          {footerMeta ?? (
+            <>
+              node {nodeId} · {provider} · raw lines {rawLineCount}
+            </>
+          )}
         </span>
         <form className="agent-run-composer" onSubmit={handleSubmit}>
           <textarea
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleComposerKeyDown}
-            disabled={!running || (!onSubmitInput && !onSubmitControl)}
+            disabled={(!running && !allowIdleSubmit) || (!onSubmitInput && !onSubmitControl)}
             spellCheck={false}
-            aria-label="Follow-up input"
+            aria-label="Message"
+            placeholder={composerPlaceholder}
           />
           <Button size="sm" variant="primary" type="submit" disabled={!canSubmit}>
-            Send
+            {running ? "Send" : idleSubmitLabel}
           </Button>
         </form>
       </footer>

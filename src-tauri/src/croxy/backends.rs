@@ -14,6 +14,7 @@ pub const STARTUP_BUFFER_CAP: usize = 10_000;
 const DEFAULT_UPSTREAM: &str = "https://api.anthropic.com";
 const DEFAULT_UPSTREAM_TIMEOUT: Duration = Duration::from_secs(120);
 static NEXT_PROXY_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
+const NON_SSE_BODY_PREVIEW_BYTES: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Observation {
@@ -428,14 +429,6 @@ async fn write_proxy_response(
         .unwrap_or_default()
         .to_string();
     let is_sse = content_type.contains("text/event-stream");
-    if is_messages
-        && status_code == 200
-        && !is_sse
-        && let Some(callback) = &callbacks.on_proxy_error
-    {
-        callback(format!("Expected SSE but got content-type: {content_type}"));
-    }
-
     write_chunked_response_head(
         &mut stream,
         status_code,
@@ -443,6 +436,7 @@ async fn write_proxy_response(
     )
     .await?;
     let mut sse_buffer = String::new();
+    let mut non_sse_body_preview = Vec::new();
     while let Some(chunk) = response.chunk().await? {
         if is_messages && is_sse {
             sse_buffer.push_str(&String::from_utf8_lossy(&chunk));
@@ -459,6 +453,9 @@ async fn write_proxy_response(
                 }
             }
         }
+        if is_messages && request_info.observe && status_code == 200 && !is_sse {
+            append_capped_bytes(&mut non_sse_body_preview, &chunk);
+        }
         write_chunk(&mut stream, &chunk).await?;
     }
     if is_messages && is_sse && !sse_buffer.trim().is_empty() {
@@ -474,8 +471,37 @@ async fn write_proxy_response(
             }
         }
     }
+    if is_messages
+        && request_info.observe
+        && status_code == 200
+        && !is_sse
+        && let Some(callback) = &callbacks.on_proxy_error
+    {
+        callback(format!(
+            "Expected SSE for observed messages request but got content-type: {content_type}{}",
+            format_body_preview(&non_sse_body_preview)
+        ));
+    }
     stream.write_all(b"0\r\n\r\n").await?;
     Ok(())
+}
+
+fn append_capped_bytes(buffer: &mut Vec<u8>, bytes: &[u8]) {
+    let remaining = NON_SSE_BODY_PREVIEW_BYTES.saturating_sub(buffer.len());
+    if remaining == 0 {
+        return;
+    }
+    buffer.extend_from_slice(&bytes[..bytes.len().min(remaining)]);
+}
+
+fn format_body_preview(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        format!(": {trimmed}")
+    }
 }
 
 async fn read_http_request(stream: &mut TcpStream) -> anyhow::Result<HttpRequest> {
@@ -918,6 +944,115 @@ mod tests {
 
         assert!(response.contains("HTTP/1.1 200 OK"));
         assert!(observations.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn local_proxy_allows_unobserved_json_messages_without_proxy_error() {
+        let upstream = spawn_test_upstream(
+            200,
+            "application/json",
+            br#"{"title":"Short title"}"#.to_vec(),
+        )
+        .await;
+        let observations = Arc::new(Mutex::new(Vec::new()));
+        let captured_observations = Arc::clone(&observations);
+        let errors = Arc::new(Mutex::new(Vec::new()));
+        let captured_errors = Arc::clone(&errors);
+        let proxy = start_proxy(
+            ProxyCallbacks {
+                on_observation: Some(Arc::new(move |observation| {
+                    captured_observations.lock().unwrap().push(observation);
+                })),
+                on_proxy_error: Some(Arc::new(move |message| {
+                    captured_errors.lock().unwrap().push(message);
+                })),
+                ..ProxyCallbacks::default()
+            },
+            ProxyOptions {
+                upstream_base_url: upstream.base_url,
+                upstream_timeout: Duration::from_secs(5),
+            },
+        )
+        .await
+        .unwrap();
+
+        let response = send_proxy_request(
+            proxy.port(),
+            "/v1/messages",
+            json!({
+                "model": "claude-haiku",
+                "system": [{
+                    "type": "text",
+                    "text": "Generate a concise, sentence-case title (3-7 words).\n\nReturn JSON with a single \"title\" field."
+                }],
+                "messages": [{"role": "user", "content": "hello"}],
+                "output_config": {
+                    "format": {
+                        "type": "json_schema",
+                        "schema": {
+                            "type": "object",
+                            "properties": {"title": {"type": "string"}},
+                            "required": ["title"]
+                        }
+                    }
+                }
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .await;
+        proxy.stop().await;
+
+        assert!(response.contains("HTTP/1.1 200 OK"));
+        assert!(response.contains(r#"{"title":"Short title"}"#));
+        assert!(observations.lock().unwrap().is_empty());
+        assert!(errors.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn local_proxy_reports_observed_json_messages_with_body_preview() {
+        let upstream = spawn_test_upstream(
+            200,
+            "application/json",
+            br#"{"error":{"message":"stream disabled"}}"#.to_vec(),
+        )
+        .await;
+        let errors = Arc::new(Mutex::new(Vec::new()));
+        let captured_errors = Arc::clone(&errors);
+        let proxy = start_proxy(
+            ProxyCallbacks {
+                on_proxy_error: Some(Arc::new(move |message| {
+                    captured_errors.lock().unwrap().push(message);
+                })),
+                ..ProxyCallbacks::default()
+            },
+            ProxyOptions {
+                upstream_base_url: upstream.base_url,
+                upstream_timeout: Duration::from_secs(5),
+            },
+        )
+        .await
+        .unwrap();
+
+        let response = send_proxy_request(
+            proxy.port(),
+            "/v1/messages",
+            json!({
+                "model": "claude-opus",
+                "system": [{"type": "text", "text": "You are Claude Code."}],
+                "messages": [{"role": "user", "content": "hello"}]
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .await;
+        proxy.stop().await;
+
+        assert!(response.contains("HTTP/1.1 200 OK"));
+        let errors = errors.lock().unwrap();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("Expected SSE for observed messages request"));
+        assert!(errors[0].contains("stream disabled"));
     }
 
     struct TestUpstream {

@@ -365,6 +365,19 @@ where
         Ok(())
     }
 
+    pub fn emit_process_error_result(&mut self, message: &str, code: i32) -> Result<()> {
+        self.output.emit_result(
+            ResultSubtype::Error,
+            message,
+            ResultMeta {
+                num_turns: Some(self.turn_count),
+                stop_reason: Some(format!("process_exit_{code}")),
+                ..ResultMeta::default()
+            },
+            &mut self.writer,
+        )
+    }
+
     fn complete_turn(&mut self) -> Result<()> {
         self.turn_active = false;
         let text = self.output.accumulated_text().to_string();
