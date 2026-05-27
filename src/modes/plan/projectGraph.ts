@@ -43,8 +43,8 @@ export async function saveWorkspace(): Promise<string> {
     throw new Error("active project is required to save graph");
   }
   const { nodes, edges } = useGraphStore.getState();
-  return invoke<string>("project_graph_save", {
-    request: { root: project.root, payload: serializeGraph(nodes, edges) },
+  return invoke<string>("workspace_graph_save", {
+    request: { workspace_id: project.id, payload: serializeGraph(nodes, edges) },
   });
 }
 
@@ -53,8 +53,8 @@ export async function loadWorkspace(): Promise<{ path: string; loaded: boolean }
   if (!project) {
     throw new Error("active project is required to load graph");
   }
-  const response = await invoke<ProjectGraphLoadResponse>("project_graph_load", {
-    request: { root: project.root },
+  const response = await invoke<ProjectGraphLoadResponse>("workspace_graph_load", {
+    request: { workspace_id: project.id, fallback_root: project.root },
   });
   if (!response.payload) {
     loadedProjectIds.add(project.id);
@@ -69,8 +69,8 @@ export async function hydrateProjectGraph(projectId: string, root: string): Prom
   if (loadedProjectIds.has(projectId)) {
     return;
   }
-  const response = await invoke<ProjectGraphLoadResponse>("project_graph_load", {
-    request: { root },
+  const response = await invoke<ProjectGraphLoadResponse>("workspace_graph_load", {
+    request: { workspace_id: projectId, fallback_root: root },
   }).catch(() => null);
   if (!response) {
     return;

@@ -12,6 +12,8 @@ export interface NodeConfig {
   provider: string;
   prompt: string;
   workdir?: string | null;
+  repoId?: string | null;
+  worktreePolicy?: "workspace" | "node-isolated";
   env?: Record<string, string>;
   timeout_ms?: number | null;
 }

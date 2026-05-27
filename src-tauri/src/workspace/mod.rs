@@ -40,6 +40,50 @@ pub fn project_graph_path(root: impl AsRef<Path>) -> PathBuf {
     root.as_ref().join(".loom").join("graph.json")
 }
 
+pub fn workspace_graph_path(workspace_id: &str) -> PathBuf {
+    let registry_path = workspace_path();
+    registry_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("workspaces")
+        .join(workspace_id)
+        .join("graph.json")
+}
+
+pub fn save_workspace_graph(workspace_id: &str, payload: &str) -> Result<PathBuf, String> {
+    let path = workspace_graph_path(workspace_id);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    fs::write(&path, payload)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+    Ok(path)
+}
+
+pub fn load_workspace_graph(
+    workspace_id: &str,
+    fallback_root: Option<impl AsRef<Path>>,
+) -> Result<(PathBuf, Option<String>), String> {
+    let path = workspace_graph_path(workspace_id);
+    if path.exists() {
+        let payload = fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        return Ok((path, Some(payload)));
+    }
+
+    if let Some(root) = fallback_root {
+        let fallback_path = project_graph_path(root.as_ref());
+        if fallback_path.exists() {
+            let payload = fs::read_to_string(&fallback_path)
+                .map_err(|error| format!("failed to read {}: {error}", fallback_path.display()))?;
+            return Ok((path, Some(payload)));
+        }
+    }
+
+    Ok((path, None))
+}
+
 pub fn save_project_graph(root: impl AsRef<Path>, payload: &str) -> Result<PathBuf, String> {
     let root = normalize_project_root(root)?;
     let path = project_graph_path(&root);
@@ -95,7 +139,7 @@ fn load_workspace_at(path: &Path) -> Result<Option<String>, String> {
 }
 
 fn maybe_backup_v1_workspace(path: &Path, next_payload: &str) -> Result<(), String> {
-    if detect_workspace_version(next_payload) != Some(2) || !path.exists() {
+    if !matches!(detect_workspace_version(next_payload), Some(2 | 3)) || !path.exists() {
         return Ok(());
     }
 

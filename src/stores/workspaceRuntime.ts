@@ -27,9 +27,12 @@ export async function closeProjectTab(projectId: string): Promise<void> {
   }
 }
 
-export async function removeProjectFromWorkspace(projectId: string): Promise<void> {
+export async function removeProjectFromWorkspace(
+  projectId: string,
+  force = false,
+): Promise<void> {
   if (await killRunningProjectNodes(projectId)) {
-    useWorkspaceStore.getState().removeProject(projectId);
+    await useWorkspaceStore.getState().removeWorkspace(projectId, force);
     disposeExecutionStore(projectId);
     disposeGraphStore(projectId);
   }

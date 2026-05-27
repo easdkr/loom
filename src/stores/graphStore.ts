@@ -1,6 +1,6 @@
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import type { NodeMeta } from "@core/index";
+import type { NodeMeta, WorktreePolicy } from "@core/index";
 import { useWorkspaceStore } from "./workspaceStore";
 
 export interface GraphNode {
@@ -10,6 +10,8 @@ export interface GraphNode {
   provider: string;
   prompt: string;
   workdir?: string | null;
+  repoId?: string | null;
+  worktreePolicy?: WorktreePolicy;
   skipped?: boolean;
   position: { x: number; y: number };
 }

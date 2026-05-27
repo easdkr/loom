@@ -39,7 +39,10 @@ function ProjectTab({ project, active }: ProjectTabProps) {
 
   function handleContextMenu(event: MouseEvent<HTMLButtonElement>): void {
     event.preventDefault();
-    const action = window.prompt("Rename / Close / Close Others / Remove", "Rename");
+    const action = window.prompt(
+      "Rename / Close / Close Others / Remove / Force Remove",
+      "Rename",
+    );
     if (!action) {
       return;
     }
@@ -61,6 +64,10 @@ function ProjectTab({ project, active }: ProjectTabProps) {
     }
     if (normalized === "remove") {
       void removeProjectFromWorkspace(project.id);
+      return;
+    }
+    if (normalized === "force remove") {
+      void removeProjectFromWorkspace(project.id, true);
     }
   }
 
@@ -104,6 +111,25 @@ export function TabBar() {
 
   const byId = new Map(projects.map((project) => [project.id, project]));
   const tabs = openTabs.map((id) => byId.get(id)).filter((item): item is Project => Boolean(item));
+  const activeProject = activeTabId ? byId.get(activeTabId) : null;
+
+  async function removeActiveProject(force: boolean): Promise<void> {
+    if (!activeProject) {
+      return;
+    }
+    const label = force ? "강제로 제거" : "제거";
+    const confirmed = window.confirm(
+      `${activeProject.name} workspace를 ${label}할까요?\n\nworktree 디렉터리와 local branch가 삭제됩니다.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await removeProjectFromWorkspace(activeProject.id, force);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   return (
     <nav className="loom-tabbar" aria-label="Projects">
@@ -119,6 +145,22 @@ export function TabBar() {
         onClick={() => void pickAndAddProject()}
       >
         +
+      </button>
+      <button
+        className="loom-tab-action"
+        type="button"
+        disabled={!activeProject}
+        onClick={() => void removeActiveProject(false)}
+      >
+        Remove
+      </button>
+      <button
+        className="loom-tab-action loom-tab-action--danger"
+        type="button"
+        disabled={!activeProject}
+        onClick={() => void removeActiveProject(true)}
+      >
+        Force Remove
       </button>
     </nav>
   );

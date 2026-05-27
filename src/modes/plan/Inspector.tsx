@@ -22,6 +22,7 @@ function Inspector() {
   const activeProject = useWorkspaceStore((state) =>
     state.projects.find((project) => project.id === activeProjectId),
   );
+  const repositories = useWorkspaceStore((state) => state.repositories);
 
   const [providers, setProviders] = useState<ProviderConfig[]>(fallbackProviders);
 
@@ -85,6 +86,39 @@ function Inspector() {
               {provider.name}
             </option>
           ))}
+        </Select>
+      </Field>
+
+      {activeProject && activeProject.repoBindings.length > 1 ? (
+        <Field label="Repository">
+          <Select
+            value={node.repoId ?? activeProject.activeRepoId}
+            onChange={(event) => updateNode(node.id, { repoId: event.target.value })}
+          >
+            {activeProject.repoBindings.map((binding) => {
+              const repository = repositories.find((item) => item.id === binding.repoId);
+              return (
+                <option key={binding.repoId} value={binding.repoId}>
+                  {repository?.name ?? binding.repoId}
+                </option>
+              );
+            })}
+          </Select>
+        </Field>
+      ) : null}
+
+      <Field label="Worktree">
+        <Select
+          value={node.worktreePolicy ?? "workspace"}
+          onChange={(event) =>
+            updateNode(node.id, {
+              worktreePolicy:
+                event.target.value === "node-isolated" ? "node-isolated" : "workspace",
+            })
+          }
+        >
+          <option value="workspace">Workspace</option>
+          <option value="node-isolated">Node isolated</option>
         </Select>
       </Field>
 

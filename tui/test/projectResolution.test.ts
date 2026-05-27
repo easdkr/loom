@@ -53,6 +53,93 @@ test("resolveProjectContext looks up LOOM_PROJECT by id or name from the v2 regi
   }
 });
 
+test("resolveProjectContext resolves v3 workspaces and repository bindings", async () => {
+  const loomHome = await makeTempDir("loom-home");
+  const apiRoot = await makeTempDir("loom-api-worktree");
+  const webRoot = await makeTempDir("loom-web-worktree");
+
+  try {
+    await fs.writeFile(
+      path.join(loomHome, "workspace.json"),
+      JSON.stringify({
+        version: 3,
+        repositories: [
+          {
+            id: "repo_api",
+            name: "api",
+            sourceRoot: apiRoot,
+            remoteUrl: null,
+            defaultBranch: "main",
+            kind: "local",
+            createdAt: 1,
+            lastOpenedAt: 1,
+          },
+          {
+            id: "repo_web",
+            name: "web",
+            sourceRoot: webRoot,
+            remoteUrl: null,
+            defaultBranch: "main",
+            kind: "local",
+            createdAt: 1,
+            lastOpenedAt: 1,
+          },
+        ],
+        workspaces: [
+          {
+            id: "workspace_munich",
+            name: "munich",
+            repoBindings: [
+              {
+                repoId: "repo_api",
+                branch: "loom/munich/api",
+                worktreePath: apiRoot,
+                bindingKind: "worktree",
+              },
+              {
+                repoId: "repo_web",
+                branch: "loom/munich/web",
+                worktreePath: webRoot,
+                bindingKind: "worktree",
+              },
+            ],
+            activeRepoId: "repo_api",
+            createdAt: 1,
+            lastOpenedAt: 1,
+          },
+        ],
+        openTabs: ["workspace_munich"],
+        activeWorkspaceId: "workspace_munich",
+      }),
+      "utf8",
+    );
+
+    const activeRepo = await resolveProjectContext({
+      workspace: "munich",
+      cwd: webRoot,
+      loomHome,
+      env: {},
+    });
+    assert.equal(activeRepo.workspaceId, "workspace_munich");
+    assert.equal(activeRepo.repoId, "repo_api");
+    assert.equal(activeRepo.root, apiRoot);
+
+    const selectedRepo = await resolveProjectContext({
+      workspace: "workspace_munich",
+      repo: "web",
+      cwd: apiRoot,
+      loomHome,
+      env: {},
+    });
+    assert.equal(selectedRepo.repoId, "repo_web");
+    assert.equal(selectedRepo.root, webRoot);
+  } finally {
+    await fs.rm(loomHome, { recursive: true, force: true });
+    await fs.rm(apiRoot, { recursive: true, force: true });
+    await fs.rm(webRoot, { recursive: true, force: true });
+  }
+});
+
 test("resolveProjectContext gives CLI project-root precedence and canonicalizes ad-hoc roots", async () => {
   const loomHome = await makeTempDir("loom-home");
   const envRoot = await makeTempDir("loom-env-project");

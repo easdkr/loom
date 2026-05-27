@@ -4,6 +4,7 @@ export function EmptyWorkspace() {
   const projects = useWorkspaceStore((state) => state.projects);
   const openTabs = useWorkspaceStore((state) => state.openTabs);
   const pickAndAddProject = useWorkspaceStore((state) => state.pickAndAddProject);
+  const cloneRepository = useWorkspaceStore((state) => state.cloneRepository);
   const openTab = useWorkspaceStore((state) => state.openTab);
 
   const openSet = new Set(openTabs);
@@ -14,13 +15,23 @@ export function EmptyWorkspace() {
 
   return (
     <main className="empty-workspace">
-      <button
-        className="empty-workspace-primary"
-        type="button"
-        onClick={() => void pickAndAddProject()}
-      >
-        프로젝트 폴더 선택
-      </button>
+      <div className="empty-workspace-actions">
+        <button
+          className="empty-workspace-primary"
+          type="button"
+          onClick={() => {
+            const url = window.prompt("Git URL");
+            if (url?.trim()) {
+              void cloneRepository(url.trim());
+            }
+          }}
+        >
+          Clone from Git URL
+        </button>
+        <button type="button" onClick={() => void pickAndAddProject()}>
+          Add Local Repository
+        </button>
+      </div>
       {recent.length > 0 ? (
         <div className="empty-workspace-recents">
           {recent.map((project) => (

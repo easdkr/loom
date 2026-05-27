@@ -535,6 +535,8 @@ mod tests {
             provider: "shell".to_string(),
             prompt: "echo ok".to_string(),
             workdir: None,
+            repo_id: None,
+            worktree_policy: None,
             env: HashMap::new(),
             timeout_ms: None,
         }
