@@ -27,6 +27,10 @@ pub struct NodeConfig {
     pub provider: String,
     pub prompt: String,
     pub workdir: Option<String>,
+    #[serde(default, rename = "repoId")]
+    pub repo_id: Option<String>,
+    #[serde(default, rename = "worktreePolicy")]
+    pub worktree_policy: Option<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
     pub timeout_ms: Option<u64>,

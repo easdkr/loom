@@ -6,6 +6,7 @@ import {
   getExecutionStore,
   getGraphStore,
   useWorkspaceStore,
+  type GraphNode,
 } from "@stores/index";
 import { resolveWorkdir, scopeProjectId, splitProjectScopedId } from "@core/index";
 import type {
@@ -34,6 +35,35 @@ interface GraphErrorEvent {
 type TerminalListener = (chunk: string) => void;
 
 const terminalListeners = new Map<string, Set<TerminalListener>>();
+
+interface NodeWorktreePrepareResponse {
+  worktree_path: string;
+}
+
+async function resolveExecutionWorkdir(projectId: string, node: GraphNode): Promise<string | null> {
+  const project = getActiveProject();
+  if (!project) {
+    return null;
+  }
+  if (node.worktreePolicy !== "node-isolated") {
+    return resolveWorkdir(node, project);
+  }
+  const response = await invoke<NodeWorktreePrepareResponse>("workspace_node_worktree_prepare", {
+    request: {
+      workspace_id: projectId,
+      repo_id: node.repoId ?? project.activeRepoId,
+      node_id: node.id,
+    },
+  });
+  const raw = node.workdir?.trim();
+  if (!raw) {
+    return response.worktree_path;
+  }
+  if (raw.startsWith("/") || /^[A-Za-z]:[\\/]/.test(raw)) {
+    return raw;
+  }
+  return `${response.worktree_path.replace(/\/+$/, "")}/${raw.replace(/^\/+/, "")}`;
+}
 
 export function subscribeToTerminal(
   nodeId: string,
@@ -238,16 +268,22 @@ export function usePlanExecution() {
     }
     const runnableIds = new Set(runnable.map((node) => node.id));
 
-    const plan = {
-      nodes: runnable.map((node) => ({
+    const planNodes = await Promise.all(
+      runnable.map(async (node) => ({
         id: scopeProjectId(project.id, node.id),
         type: node.type,
         provider: node.provider,
         prompt: node.prompt,
-        workdir: resolveWorkdir(node, project),
+        workdir: await resolveExecutionWorkdir(project.id, node),
+        repoId: node.repoId ?? project.activeRepoId,
+        worktreePolicy: node.worktreePolicy ?? "workspace",
         env: {},
         timeout_ms: null,
       })),
+    );
+
+    const plan = {
+      nodes: planNodes,
       edges: edges
         .filter((edge) => runnableIds.has(edge.source) && runnableIds.has(edge.target))
         .map((edge) => ({

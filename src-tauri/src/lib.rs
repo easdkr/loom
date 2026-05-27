@@ -1,6 +1,8 @@
 mod croxy;
+mod git;
 mod graph;
 mod pty;
+mod repository;
 mod review;
 mod templates;
 mod workspace;
@@ -20,8 +22,9 @@ use templates::{
     save_template,
 };
 use workspace::{
-    load_project_graph, load_workspace, normalize_project_root as canonicalize_project_root,
-    project_graph_path, save_project_graph, save_workspace, workspace_path,
+    load_project_graph, load_workspace, load_workspace_graph,
+    normalize_project_root as canonicalize_project_root, project_graph_path, save_project_graph,
+    save_workspace, save_workspace_graph, workspace_path,
 };
 
 #[derive(Clone, Default)]
@@ -101,6 +104,56 @@ struct ProjectGraphLoadRequest {
 struct ProjectGraphLoadResponse {
     path: String,
     payload: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RepoRegisterLocalRequest {
+    root: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RepoCloneRequest {
+    url: String,
+    name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorkspaceCreateRequest {
+    name: String,
+    repo_ids: Vec<String>,
+    base_ref: Option<String>,
+    #[serde(default)]
+    repositories: Vec<repository::Repository>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorkspaceRemoveRequest {
+    workspace_id: String,
+    force: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorkspaceStatusRequest {
+    workspace_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorkspaceGraphSaveRequest {
+    workspace_id: String,
+    payload: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WorkspaceGraphLoadRequest {
+    workspace_id: String,
+    fallback_root: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct NodeWorktreePrepareRequest {
+    workspace_id: String,
+    repo_id: String,
+    node_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -263,6 +316,69 @@ fn project_graph_load(
 }
 
 #[tauri::command]
+fn repo_register_local(
+    request: RepoRegisterLocalRequest,
+) -> Result<repository::Repository, String> {
+    repository::register_local(&request.root)
+}
+
+#[tauri::command]
+fn repo_clone(request: RepoCloneRequest) -> Result<repository::Repository, String> {
+    repository::clone_repository(&request.url, request.name.as_deref())
+}
+
+#[tauri::command]
+fn workspace_create(
+    request: WorkspaceCreateRequest,
+) -> Result<repository::WorkspaceMutationResponse, String> {
+    repository::create_workspace(
+        &request.name,
+        &request.repo_ids,
+        request.base_ref.as_deref(),
+        &request.repositories,
+    )
+}
+
+#[tauri::command]
+fn workspace_remove(
+    request: WorkspaceRemoveRequest,
+) -> Result<repository::WorkspaceMutationResponse, String> {
+    repository::remove_workspace(&request.workspace_id, request.force)
+}
+
+#[tauri::command]
+fn workspace_status(
+    request: WorkspaceStatusRequest,
+) -> Result<repository::WorkspaceStatusResponse, String> {
+    repository::workspace_status(&request.workspace_id)
+}
+
+#[tauri::command]
+fn workspace_graph_save(request: WorkspaceGraphSaveRequest) -> Result<String, String> {
+    save_workspace_graph(&request.workspace_id, &request.payload)
+        .map(|path| path.display().to_string())
+}
+
+#[tauri::command]
+fn workspace_graph_load(
+    request: WorkspaceGraphLoadRequest,
+) -> Result<ProjectGraphLoadResponse, String> {
+    let (path, payload) =
+        load_workspace_graph(&request.workspace_id, request.fallback_root.as_deref())?;
+    Ok(ProjectGraphLoadResponse {
+        path: path.display().to_string(),
+        payload,
+    })
+}
+
+#[tauri::command]
+fn workspace_node_worktree_prepare(
+    request: NodeWorktreePrepareRequest,
+) -> Result<repository::NodeWorktreePrepareResponse, String> {
+    repository::prepare_node_worktree(&request.workspace_id, &request.repo_id, &request.node_id)
+}
+
+#[tauri::command]
 fn list_templates_command() -> Result<TemplatesResponse, String> {
     list_templates()
 }
@@ -315,6 +431,14 @@ pub fn run() {
             normalize_project_root,
             project_graph_save,
             project_graph_load,
+            repo_register_local,
+            repo_clone,
+            workspace_create,
+            workspace_remove,
+            workspace_status,
+            workspace_graph_save,
+            workspace_graph_load,
+            workspace_node_worktree_prepare,
             list_templates_command,
             load_template_command,
             save_template_command,

@@ -19,6 +19,18 @@ export type {
 } from "./task-graph";
 
 export { topologicalBatches } from "./task-graph";
-export type { Project, WorkspaceRegistryV2, ProjectGraphPayloadV1 } from "./project";
+export type {
+  Project,
+  ProjectGraphPayloadV1,
+  LegacyProject,
+  Repository,
+  RepositoryKind,
+  Workspace,
+  WorkspaceRegistryV2,
+  WorkspaceRegistryV3,
+  WorkspaceRepoBinding,
+  WorkspaceRepoBindingKind,
+  WorktreePolicy,
+} from "./project";
 export { createProjectId, scopeProjectId, splitProjectScopedId } from "./projectId";
 export { basename, lastPathSegments, resolveWorkdir } from "./workdir";

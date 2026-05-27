@@ -2,6 +2,7 @@ import type { Project } from "./project";
 
 interface WorkdirSource {
   workdir?: string | null;
+  repoId?: string | null;
 }
 
 function isAbsolutePath(path: string): boolean {
@@ -30,8 +31,12 @@ export function resolveWorkdir(source: WorkdirSource, project: Project | null): 
   if (!project) {
     return raw || null;
   }
+  const binding =
+    project.repoBindings.find((item) => item.repoId === source.repoId) ??
+    project.repoBindings.find((item) => item.repoId === project.activeRepoId);
+  const root = binding?.worktreePath ?? project.root;
   if (!raw) {
-    return project.root;
+    return root;
   }
-  return isAbsolutePath(raw) ? raw : joinPath(project.root, raw);
+  return isAbsolutePath(raw) ? raw : joinPath(root, raw);
 }
