@@ -1,6 +1,7 @@
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { useWorkspaceStore } from "./workspaceStore";
+import { deriveWorkspaceStatus, type WorkspaceDerivedStatus } from "./workspaceStatus";
 import {
   appendSystemMessage,
   createUserTranscript,
@@ -28,6 +29,14 @@ export interface NodeExecution {
   errorClass?: "rate-limit" | "provider-error" | null;
 }
 
+export interface PendingHumanReview {
+  nodeId: string;
+  fullNodeId: string;
+  prompt: string;
+  upstream: { node_id: string; result: string }[];
+  requestedAt: number;
+}
+
 export interface ExecutionState {
   runId: string | null;
   perNode: Record<string, NodeExecution>;
@@ -35,10 +44,14 @@ export interface ExecutionState {
   outputByNode: Record<string, string>;
   transcriptByNode: Record<string, ExecutionTranscriptMessage[]>;
   activityByNode: Record<string, string | undefined>;
+  pendingHumanReview: PendingHumanReview | null;
+  humanReviewOpen: boolean;
 
   beginRun: (runId: string, nodeIds: string[]) => void;
   setStatus: (nodeId: string, patch: Partial<NodeExecution>) => void;
   setActive: (nodeIds: string[]) => void;
+  setPendingHumanReview: (review: PendingHumanReview | null) => void;
+  setHumanReviewOpen: (open: boolean) => void;
   appendOutput: (nodeId: string, chunk: string) => void;
   beginTranscript: (nodeId: string, prompt: string) => void;
   appendUserMessage: (nodeId: string, text: string) => Promise<void>;
@@ -174,6 +187,8 @@ function createExecutionStore(): ExecutionStoreApi {
     outputByNode: {},
     transcriptByNode: {},
     activityByNode: {},
+    pendingHumanReview: null,
+    humanReviewOpen: false,
 
     beginRun: (runId, nodeIds) => {
       disposeAllSessions();
@@ -188,6 +203,8 @@ function createExecutionStore(): ExecutionStoreApi {
         outputByNode: {},
         transcriptByNode: {},
         activityByNode: {},
+        pendingHumanReview: null,
+        humanReviewOpen: false,
       });
     },
     setStatus: (nodeId, patch) =>
@@ -198,6 +215,8 @@ function createExecutionStore(): ExecutionStoreApi {
         },
       })),
     setActive: (nodeIds) => set({ activeNodeIds: nodeIds }),
+    setPendingHumanReview: (review) => set({ pendingHumanReview: review, humanReviewOpen: Boolean(review) }),
+    setHumanReviewOpen: (open) => set({ humanReviewOpen: open }),
     appendOutput: (nodeId, chunk) =>
       set((state) => ({
         outputByNode: {
@@ -383,6 +402,8 @@ function createExecutionStore(): ExecutionStoreApi {
         outputByNode: {},
         transcriptByNode: {},
         activityByNode: {},
+        pendingHumanReview: null,
+        humanReviewOpen: false,
       });
     },
   }));
@@ -409,13 +430,13 @@ export function disposeExecutionStore(projectId: string): void {
 }
 
 function getActiveExecutionStore(): ExecutionStoreApi {
-  const activeId = useWorkspaceStore.getState().activeTabId;
+  const activeId = useWorkspaceStore.getState().activeWorkspaceId;
   return activeId ? getExecutionStore(activeId) : emptyExecutionStore;
 }
 
 export const useExecutionStore = Object.assign(
   function useExecutionStoreSelector<T>(selector: (state: ExecutionState) => T): T {
-    const activeId = useWorkspaceStore((state) => state.activeTabId);
+    const activeId = useWorkspaceStore((state) => state.activeWorkspaceId);
     const store = activeId ? getExecutionStore(activeId) : emptyExecutionStore;
     return useStore(store, selector);
   },
@@ -426,18 +447,12 @@ export const useExecutionStore = Object.assign(
   },
 );
 
-export function useProjectExecutionStatus(projectId: string): ExecutionStatus {
+export function useProjectExecutionStatus(projectId: string): WorkspaceDerivedStatus {
   return useStore(getExecutionStore(projectId), (state) => {
-    const executions = Object.values(state.perNode);
-    if (state.activeNodeIds.length > 0 || executions.some((item) => item.status === "running")) {
-      return "running";
-    }
-    if (executions.some((item) => item.status === "error")) {
-      return "error";
-    }
-    if (executions.some((item) => item.status === "complete")) {
-      return "complete";
-    }
-    return "idle";
+    return deriveWorkspaceStatus({
+      pendingReview: Boolean(state.pendingHumanReview),
+      activeNodeIds: state.activeNodeIds,
+      perNode: state.perNode,
+    });
   });
 }

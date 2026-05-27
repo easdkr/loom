@@ -1,11 +1,12 @@
 import { useWorkspaceStore } from "@stores/index";
+import { Button } from "./Button";
 
 export function EmptyWorkspace() {
   const projects = useWorkspaceStore((state) => state.projects);
   const openTabs = useWorkspaceStore((state) => state.openTabs);
   const pickAndAddProject = useWorkspaceStore((state) => state.pickAndAddProject);
   const cloneRepository = useWorkspaceStore((state) => state.cloneRepository);
-  const openTab = useWorkspaceStore((state) => state.openTab);
+  const openWorkspace = useWorkspaceStore((state) => state.openWorkspace);
 
   const openSet = new Set(openTabs);
   const recent = projects
@@ -14,11 +15,18 @@ export function EmptyWorkspace() {
     .slice(0, 5);
 
   return (
-    <main className="empty-workspace">
+    <div className="empty-workspace">
       <div className="empty-workspace-actions">
-        <button
-          className="empty-workspace-primary"
-          type="button"
+        <Button
+          variant="primary"
+          onClick={() => void pickAndAddProject()}
+        >
+          Create Workspace
+        </Button>
+        <Button onClick={() => void pickAndAddProject()}>
+          Register Repository
+        </Button>
+        <Button
           onClick={() => {
             const url = window.prompt("Git URL");
             if (url?.trim()) {
@@ -27,21 +35,18 @@ export function EmptyWorkspace() {
           }}
         >
           Clone from Git URL
-        </button>
-        <button type="button" onClick={() => void pickAndAddProject()}>
-          Add Local Repository
-        </button>
+        </Button>
       </div>
       {recent.length > 0 ? (
         <div className="empty-workspace-recents">
           {recent.map((project) => (
-            <button key={project.id} type="button" onClick={() => openTab(project.id)}>
+            <button key={project.id} type="button" onClick={() => openWorkspace(project.id)}>
               <span>{project.name}</span>
               <code>{project.root}</code>
             </button>
           ))}
         </div>
       ) : null}
-    </main>
+    </div>
   );
 }

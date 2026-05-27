@@ -82,32 +82,34 @@
   display: flex;
   align-items: stretch;
   justify-content: flex-end;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--scrim-overlay);
+  backdrop-filter: blur(var(--space-2));
+  -webkit-backdrop-filter: blur(var(--space-2));
 }
 
 .plan-review-sheet {
   display: flex;
   flex-direction: column;
-  width: min(640px, 90vw);
+  width: min(calc(var(--space-12) * 13 + var(--space-4)), 90vw);
   height: 100%;
   background: var(--bg-surface);
   border-left: var(--border-width-default) solid var(--border-subtle);
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.3);
+  box-shadow: calc(var(--space-2) * -1) 0 var(--space-6) rgba(0, 0, 0, 0.35);
 }
 
 .plan-review-sheet--popover {
-  width: min(360px, 90vw);
+  width: min(var(--panel-width-default), 90vw);
   height: auto;
   max-height: 70vh;
   margin: auto;
   border: var(--border-width-default) solid var(--border-subtle);
   border-radius: var(--radius-md);
   align-self: center;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-popover);
 }
 
 .plan-review-sheet--human {
-  width: min(720px, 92vw);
+  width: min(calc(var(--space-12) * 15), 92vw);
 }
 
 .plan-review-backdrop:has(.plan-review-sheet--popover) {
@@ -469,18 +471,20 @@
 }
 
 .react-flow__handle {
-  width: 12px;
-  height: 12px;
+  width: var(--space-3);
+  height: var(--space-3);
   background: var(--bg-elevated);
-  border: 1.5px solid var(--border-strong);
+  border: calc(var(--border-width-default) * 1.5) solid var(--border-strong);
   cursor: crosshair;
-  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+  transition: transform var(--motion-instant) var(--ease-out),
+    background var(--motion-instant) var(--ease-out),
+    border-color var(--motion-instant) var(--ease-out);
 }
 
 .react-flow__handle::after {
   content: "";
   position: absolute;
-  inset: -6px;
+  inset: calc(var(--space-1) * -1.5);
 }
 
 .react-flow__handle:hover,

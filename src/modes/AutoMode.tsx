@@ -11,7 +11,7 @@ import {
   StatusbarSpacer,
   Textarea,
 } from "@design/components";
-import { useGraphStore, useSettingsStore, useWorkspaceStore } from "@stores/index";
+import { useGraphStore, useWorkspaceStore } from "@stores/index";
 import {
   fallbackProviders,
   type ProviderConfig,
@@ -38,15 +38,15 @@ function AutoMode() {
   const [providers, setProviders] = useState<ProviderConfig[]>(fallbackProviders);
   const [draft, setDraft] = useState<AutoGenerationResult | null>(null);
   const [message, setMessage] = useState("Ready");
-  const activeTabId = useWorkspaceStore((state) => state.activeTabId);
+  const activeTabId = useWorkspaceStore((state) => state.activeWorkspaceId);
   const activeProject = useWorkspaceStore((state) =>
     state.projects.find((project) => project.id === activeTabId),
   );
+  const setWorkspaceMode = useWorkspaceStore((state) => state.setWorkspaceMode);
 
   const setNodes = useGraphStore((state) => state.setNodes);
   const setEdges = useGraphStore((state) => state.setEdges);
   const selectNode = useGraphStore((state) => state.selectNode);
-  const setMode = useSettingsStore((state) => state.setMode);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +90,9 @@ function AutoMode() {
     setNodes(draft.nodes);
     setEdges(draft.edges);
     selectNode(null);
-    setMode("plan");
+    if (activeProject) {
+      setWorkspaceMode(activeProject.id, "plan");
+    }
   }
 
   function handleDiscard() {

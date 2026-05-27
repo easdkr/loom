@@ -3,8 +3,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { create, type StoreApi, type UseBoundStore } from "zustand";
 import {
   basename,
+  createWorkspaceView,
   createProjectId,
+  DEFAULT_WORKSPACE_MODE,
+  normalizeWorkspace,
   type LegacyProject,
+  type LoomMode,
   type Project,
   type Repository,
   type Workspace,
@@ -48,6 +52,7 @@ export interface WorkspaceState {
   workspaces: Workspace[];
   projects: Project[];
   openTabs: string[];
+  activeWorkspaceId: string | null;
   activeTabId: string | null;
   ready: boolean;
   error: string | null;
@@ -58,6 +63,11 @@ export interface WorkspaceState {
   registerLocalRepository: (root: string) => Promise<Repository>;
   cloneRepository: (url: string, name?: string) => Promise<Project>;
   createWorkspace: (name: string, repoIds: string[], baseRef?: string) => Promise<Project>;
+  openWorkspace: (id: string) => void;
+  closeWorkspace: (id: string) => void;
+  setActiveWorkspace: (id: string) => void;
+  setWorkspaceMode: (id: string, mode: LoomMode) => void;
+  setActiveRepository: (workspaceId: string, repoId: string) => void;
   openTab: (id: string) => void;
   closeTab: (id: string) => void;
   closeOtherTabs: (id: string) => void;
@@ -74,7 +84,7 @@ function registryFromState(state: WorkspaceState): WorkspaceRegistryV3 {
   return {
     version: 3,
     repositories: state.repositories,
-    workspaces: state.workspaces,
+    workspaces: state.workspaces.map(normalizeWorkspace),
     openTabs: state.openTabs,
     activeWorkspaceId: state.activeTabId,
   };
@@ -99,29 +109,19 @@ function scheduleRegistrySave(get: () => WorkspaceState): void {
 }
 
 function projectViews(registry: WorkspaceRegistryV3): Project[] {
-  const repositoriesById = new Map(
-    registry.repositories.map((repository) => [repository.id, repository]),
-  );
   const projects: Project[] = [];
   for (const workspace of registry.workspaces) {
-    const activeBinding =
-      workspace.repoBindings.find((binding) => binding.repoId === workspace.activeRepoId) ??
-      workspace.repoBindings[0];
-    if (!activeBinding) {
-      continue;
+    const view = createWorkspaceView(workspace, registry.repositories);
+    if (view) {
+      projects.push(view);
     }
-    projects.push({
-      ...workspace,
-      activeRepoId: activeBinding.repoId,
-      root: activeBinding.worktreePath,
-      repository: repositoriesById.get(activeBinding.repoId),
-    });
   }
   return projects;
 }
 
 function applyRegistry(registry: WorkspaceRegistryV3): Partial<WorkspaceState> {
-  const workspaceIds = new Set(registry.workspaces.map((workspace) => workspace.id));
+  const workspaces = registry.workspaces.map(normalizeWorkspace);
+  const workspaceIds = new Set(workspaces.map((workspace) => workspace.id));
   const openTabs = registry.openTabs.filter((id) => workspaceIds.has(id));
   const activeTabId =
     registry.activeWorkspaceId && openTabs.includes(registry.activeWorkspaceId)
@@ -129,6 +129,7 @@ function applyRegistry(registry: WorkspaceRegistryV3): Partial<WorkspaceState> {
       : (openTabs[0] ?? null);
   const normalized = {
     ...registry,
+    workspaces,
     openTabs,
     activeWorkspaceId: activeTabId,
   };
@@ -137,6 +138,7 @@ function applyRegistry(registry: WorkspaceRegistryV3): Partial<WorkspaceState> {
     workspaces: normalized.workspaces,
     projects: projectViews(normalized),
     openTabs,
+    activeWorkspaceId: activeTabId,
     activeTabId,
     ready: true,
     error: null,
@@ -191,6 +193,7 @@ function legacyProjectToV3(project: LegacyProject): {
       },
     ],
     activeRepoId: repoId,
+    mode: DEFAULT_WORKSPACE_MODE,
     createdAt: project.lastOpenedAt || now,
     lastOpenedAt: project.lastOpenedAt || now,
   };
@@ -244,6 +247,7 @@ async function migrateV1(payload: V1WorkspacePayload): Promise<WorkspaceRegistry
       },
     ],
     activeRepoId: repoId,
+    mode: DEFAULT_WORKSPACE_MODE,
     createdAt: now,
     lastOpenedAt: now,
   };
@@ -297,6 +301,7 @@ export const useWorkspaceStore: UseBoundStore<StoreApi<WorkspaceState>> = create
   workspaces: [],
   projects: [],
   openTabs: [],
+  activeWorkspaceId: null,
   activeTabId: null,
   ready: false,
   error: null,
@@ -396,7 +401,7 @@ export const useWorkspaceStore: UseBoundStore<StoreApi<WorkspaceState>> = create
     return created;
   },
 
-  openTab: (id) => {
+  openWorkspace: (id) => {
     set((state) => {
       const workspace = state.workspaces.find((item) => item.id === id);
       if (!workspace) {
@@ -415,6 +420,7 @@ export const useWorkspaceStore: UseBoundStore<StoreApi<WorkspaceState>> = create
       return {
         workspaces,
         openTabs,
+        activeWorkspaceId: id,
         activeTabId: id,
         projects: projectViews(registry),
       };
@@ -422,23 +428,37 @@ export const useWorkspaceStore: UseBoundStore<StoreApi<WorkspaceState>> = create
     scheduleRegistrySave(get);
   },
 
-  closeTab: (id) => {
+  closeWorkspace: (id) => {
     set((state) => {
       const openTabs = state.openTabs.filter((tabId) => tabId !== id);
       const activeTabId =
         state.activeTabId === id ? (openTabs[0] ?? null) : state.activeTabId;
       const registry = registryFromState({ ...state, openTabs, activeTabId });
-      return { openTabs, activeTabId, projects: projectViews(registry) };
+      return {
+        openTabs,
+        activeWorkspaceId: activeTabId,
+        activeTabId,
+        projects: projectViews(registry),
+      };
     });
     scheduleRegistrySave(get);
   },
+
+  openTab: (id) => get().openWorkspace(id),
+
+  closeTab: (id) => get().closeWorkspace(id),
 
   closeOtherTabs: (id) => {
     set((state) => {
       const openTabs = state.openTabs.includes(id) ? [id] : [];
       const activeTabId = state.openTabs.includes(id) ? id : null;
       const registry = registryFromState({ ...state, openTabs, activeTabId });
-      return { openTabs, activeTabId, projects: projectViews(registry) };
+      return {
+        openTabs,
+        activeWorkspaceId: activeTabId,
+        activeTabId,
+        projects: projectViews(registry),
+      };
     });
     scheduleRegistrySave(get);
   },
@@ -453,6 +473,7 @@ export const useWorkspaceStore: UseBoundStore<StoreApi<WorkspaceState>> = create
       return {
         workspaces,
         openTabs,
+        activeWorkspaceId: activeTabId,
         activeTabId,
         projects: projectViews(registry),
       };
@@ -500,7 +521,7 @@ export const useWorkspaceStore: UseBoundStore<StoreApi<WorkspaceState>> = create
     scheduleRegistrySave(get);
   },
 
-  setActiveTab: (id) => {
+  setActiveWorkspace: (id) => {
     set((state) => {
       if (!state.openTabs.includes(id)) {
         return state;
@@ -514,7 +535,42 @@ export const useWorkspaceStore: UseBoundStore<StoreApi<WorkspaceState>> = create
         activeTabId: id,
       });
       return {
+        activeWorkspaceId: id,
         activeTabId: id,
+        workspaces,
+        projects: projectViews(registry),
+      };
+    });
+    scheduleRegistrySave(get);
+  },
+
+  setActiveTab: (id) => get().setActiveWorkspace(id),
+
+  setWorkspaceMode: (id, mode) => {
+    set((state) => {
+      const workspaces = state.workspaces.map((workspace) =>
+        workspace.id === id ? { ...workspace, mode } : workspace,
+      );
+      const registry = registryFromState({ ...state, workspaces });
+      return {
+        workspaces,
+        projects: projectViews(registry),
+      };
+    });
+    scheduleRegistrySave(get);
+  },
+
+  setActiveRepository: (workspaceId, repoId) => {
+    set((state) => {
+      const workspace = state.workspaces.find((item) => item.id === workspaceId);
+      if (!workspace?.repoBindings.some((binding) => binding.repoId === repoId)) {
+        return state;
+      }
+      const workspaces = state.workspaces.map((item) =>
+        item.id === workspaceId ? { ...item, activeRepoId: repoId, lastOpenedAt: Date.now() } : item,
+      );
+      const registry = registryFromState({ ...state, workspaces });
+      return {
         workspaces,
         projects: projectViews(registry),
       };
@@ -525,5 +581,5 @@ export const useWorkspaceStore: UseBoundStore<StoreApi<WorkspaceState>> = create
 
 export function getActiveProject(): Project | null {
   const state = useWorkspaceStore.getState();
-  return state.projects.find((project) => project.id === state.activeTabId) ?? null;
+  return state.projects.find((project) => project.id === state.activeWorkspaceId) ?? null;
 }

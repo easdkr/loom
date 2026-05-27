@@ -1,6 +1,5 @@
 import { create } from "zustand";
-
-export type LoomMode = "single" | "plan" | "auto";
+import type { LoomMode } from "@core/index";
 
 interface SettingsState {
   mode: LoomMode;

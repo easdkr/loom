@@ -7,10 +7,10 @@ import {
   Field,
   Input,
   Select,
+  Toolbar,
   Textarea,
 } from "@design/components";
-import { useGraphStore } from "@stores/index";
-import { useWorkspaceStore } from "@stores/index";
+import { useGraphStore, useWorkspaceStore } from "@stores/index";
 import { fallbackProviders, type ProviderConfig, type ProvidersResponse } from "@providers";
 
 function Inspector() {
@@ -18,7 +18,7 @@ function Inspector() {
   const node = useGraphStore((state) => state.nodes.find((n) => n.id === state.selectedNodeId));
   const updateNode = useGraphStore((state) => state.updateNode);
   const removeNode = useGraphStore((state) => state.removeNode);
-  const activeProjectId = useWorkspaceStore((state) => state.activeTabId);
+  const activeProjectId = useWorkspaceStore((state) => state.activeWorkspaceId);
   const activeProject = useWorkspaceStore((state) =>
     state.projects.find((project) => project.id === activeProjectId),
   );
@@ -76,6 +76,15 @@ function Inspector() {
         <span className="plan-inspector-name">{node.meta.name}</span>
       </div>
 
+      {activeProject ? (
+        <div className="plan-inspector-default-repo">
+          <span>Workspace default</span>
+          <Badge tone="accent">
+            {activeProject.activeRepository?.name ?? activeProject.activeRepoId}
+          </Badge>
+        </div>
+      ) : null}
+
       <Field label="Provider">
         <Select
           value={node.provider}
@@ -90,11 +99,18 @@ function Inspector() {
       </Field>
 
       {activeProject && activeProject.repoBindings.length > 1 ? (
-        <Field label="Repository">
+        <Field label="Repository override">
           <Select
-            value={node.repoId ?? activeProject.activeRepoId}
-            onChange={(event) => updateNode(node.id, { repoId: event.target.value })}
+            value={node.repoId ?? "__workspace__"}
+            onChange={(event) =>
+              updateNode(node.id, {
+                repoId: event.target.value === "__workspace__" ? null : event.target.value,
+              })
+            }
           >
+            <option value="__workspace__">
+              Workspace default ({activeProject.activeRepository?.name ?? activeProject.activeRepoId})
+            </option>
             {activeProject.repoBindings.map((binding) => {
               const repository = repositories.find((item) => item.id === binding.repoId);
               return (
@@ -108,18 +124,14 @@ function Inspector() {
       ) : null}
 
       <Field label="Worktree">
-        <Select
+        <Toolbar
           value={node.worktreePolicy ?? "workspace"}
-          onChange={(event) =>
-            updateNode(node.id, {
-              worktreePolicy:
-                event.target.value === "node-isolated" ? "node-isolated" : "workspace",
-            })
-          }
-        >
-          <option value="workspace">Workspace</option>
-          <option value="node-isolated">Node isolated</option>
-        </Select>
+          onChange={(value) => updateNode(node.id, { worktreePolicy: value })}
+          items={[
+            { id: "workspace", label: "Workspace" },
+            { id: "node-isolated", label: "Node isolated" },
+          ]}
+        />
       </Field>
 
       <Field label="Workdir (선택)">

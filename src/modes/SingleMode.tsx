@@ -15,7 +15,6 @@ import {
   getExecutionStore,
   useGraphStore,
   useExecutionStore,
-  useSettingsStore,
   useWorkspaceStore,
 } from "@stores/index";
 import { findPaletteEntry } from "@modes/plan/node-catalog";
@@ -54,8 +53,8 @@ function defaultSingleProvider(providers: ProviderConfig[]): string {
 }
 
 function SingleMode() {
-  const setMode = useSettingsStore((state) => state.setMode);
-  const activeProjectId = useWorkspaceStore((state) => state.activeTabId);
+  const activeProjectId = useWorkspaceStore((state) => state.activeWorkspaceId);
+  const setWorkspaceMode = useWorkspaceStore((state) => state.setWorkspaceMode);
   const activeProject = getActiveProject();
   const upsertNode = useGraphStore((state) => state.upsertNode);
   const selectNode = useGraphStore((state) => state.selectNode);
@@ -438,7 +437,9 @@ function SingleMode() {
       position: { x: 60, y: 60 },
     });
     selectNode(nodeId);
-    setMode("plan");
+    if (activeProjectId) {
+      setWorkspaceMode(activeProjectId, "plan");
+    }
   }
 
   async function resizeTerminal(size: TerminalSize) {
@@ -475,7 +476,7 @@ function SingleMode() {
   }
 
   return (
-    <main className="loom-shell">
+    <div className="loom-shell">
       <section className="single-layout">
         <aside className="single-sidebar" aria-label="Single mode controls">
           <label className="field">
@@ -609,7 +610,7 @@ function SingleMode() {
         <span>{activeProject ? lastPathSegments(activeProject.root) : "no project"}</span>
         <span>{provider?.name ?? "—"}</span>
       </Statusbar>
-    </main>
+    </div>
   );
 }
 

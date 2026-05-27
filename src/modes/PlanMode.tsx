@@ -1,9 +1,8 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { lastPathSegments } from "@core/index";
 import { Panel, Statusbar, StatusbarSpacer, Button } from "@design/components";
 import { useExecutionStore, useGraphStore, useWorkspaceStore } from "@stores/index";
 import GraphCanvas from "./plan/GraphCanvas";
-import NodePalette from "./plan/NodePalette";
 import Inspector from "./plan/Inspector";
 import ExecutionDrawer from "./plan/ExecutionDrawer";
 import PlanReview from "./plan/PlanReview";
@@ -21,7 +20,7 @@ function PlanMode() {
   const activeNodeIds = useExecutionStore((state) => state.activeNodeIds);
   const runId = useExecutionStore((state) => state.runId);
   const clearExecution = useExecutionStore((state) => state.clear);
-  const activeTabId = useWorkspaceStore((state) => state.activeTabId);
+  const activeTabId = useWorkspaceStore((state) => state.activeWorkspaceId);
   const activeProject = useWorkspaceStore((state) =>
     state.projects.find((project) => project.id === activeTabId),
   );
@@ -78,26 +77,24 @@ function PlanMode() {
 
   const running = activeNodeIds.length > 0;
 
+  useEffect(() => {
+    function handleOpenTemplates(): void {
+      setTemplatesOpen(true);
+    }
+    window.addEventListener("loom:open-templates", handleOpenTemplates);
+    return () => window.removeEventListener("loom:open-templates", handleOpenTemplates);
+  }, []);
+
   return (
     <section className="mode-layout mode-layout--plan" data-inspector-open={inspectorOpen}>
-      <Panel
-        className="mode-sidebar"
-        title="Palette"
-        actions={
-          <Button size="sm" variant="ghost" onClick={clear} disabled={nodeCount === 0}>
-            Clear
-          </Button>
-        }
-        flush
-      >
-        <NodePalette />
-      </Panel>
-
       <Panel
         className="mode-canvas"
         title="Graph"
         actions={
           <div className="plan-canvas-actions">
+            <Button size="sm" variant="ghost" onClick={clear} disabled={nodeCount === 0}>
+              Clear
+            </Button>
             <Button size="sm" variant="ghost" onClick={() => setTemplatesOpen(true)}>
               Templates
             </Button>

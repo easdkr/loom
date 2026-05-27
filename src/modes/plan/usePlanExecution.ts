@@ -41,7 +41,7 @@ interface NodeWorktreePrepareResponse {
 }
 
 async function resolveExecutionWorkdir(projectId: string, node: GraphNode): Promise<string | null> {
-  const project = getActiveProject();
+  const project = useWorkspaceStore.getState().projects.find((item) => item.id === projectId) ?? null;
   if (!project) {
     return null;
   }
@@ -254,7 +254,7 @@ export function ExecutionEventBridge() {
 }
 
 export function usePlanExecution() {
-  const activeProjectId = useWorkspaceStore((state) => state.activeTabId);
+  const activeProjectId = useWorkspaceStore((state) => state.activeWorkspaceId);
 
   const runPlan = useCallback(async () => {
     const project = getActiveProject();
