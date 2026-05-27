@@ -19,6 +19,19 @@ pub fn is_transcript_api_error_message(event: &Value) -> bool {
         && event.get("isApiErrorMessage").and_then(Value::as_bool) == Some(true)
 }
 
+pub fn is_transcript_tool_result_user_event(event: &Value) -> bool {
+    event.get("type").and_then(Value::as_str) == Some("user")
+        && event
+            .get("message")
+            .and_then(|message| message.get("content"))
+            .and_then(Value::as_array)
+            .is_some_and(|content| {
+                content
+                    .iter()
+                    .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_result"))
+            })
+}
+
 pub fn get_transcript_assistant_text(event: &Value) -> String {
     event
         .get("message")
@@ -153,5 +166,22 @@ mod tests {
 
         assert!(is_transcript_api_error_message(&event));
         assert_eq!(get_transcript_assistant_text(&event), "failed again");
+    }
+
+    #[test]
+    fn detects_tool_result_user_events() {
+        assert!(is_transcript_tool_result_user_event(&json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    { "type": "tool_result", "tool_use_id": "toolu_1", "content": "ok" }
+                ]
+            }
+        })));
+        assert!(!is_transcript_tool_result_user_event(&json!({
+            "type": "user",
+            "message": { "role": "user", "content": "plain prompt" }
+        })));
     }
 }

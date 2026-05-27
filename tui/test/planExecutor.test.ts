@@ -3,15 +3,23 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { PlanExecutor } from "../src/graph/planExecutor.js";
+import { composeNodePrompt, PlanExecutor } from "../src/graph/planExecutor.js";
 import { fallbackProviders } from "../../src/providers/index.js";
 import type { ExecutionPlan } from "../../src/core/task-graph.js";
+import type { ProviderConfig } from "../../src/providers/types.js";
 
 const shellProvider = fallbackProviders.find((provider) => provider.name === "shell");
 if (!shellProvider) {
   throw new Error("shell provider missing from fallback registry");
 }
 const providersMap = new Map([[shellProvider.name, shellProvider]]);
+
+const agentProvider: ProviderConfig = {
+  ...shellProvider,
+  name: "codex",
+  command: "codex",
+  display_mode: "agent",
+};
 
 function shellNode(id: string, prompt: string, workdir: string | null = null) {
   return {
@@ -24,6 +32,37 @@ function shellNode(id: string, prompt: string, workdir: string | null = null) {
     timeout_ms: 15000,
   };
 }
+
+test("composeNodePrompt attaches upstream output to LLM reviewer prompts", () => {
+  const prompt = composeNodePrompt(
+    {
+      id: "review",
+      type: "reviewer:llm",
+      provider: agentProvider.name,
+      prompt: "Review the result.",
+      workdir: null,
+      env: {},
+      timeout_ms: null,
+    },
+    agentProvider,
+    [["worker", "changed src/main.ts"]],
+  );
+
+  assert.match(prompt, /Review the result\./);
+  assert.match(prompt, /\[worker\]\nchanged src\/main\.ts/);
+  assert.match(prompt, /git status/);
+  assert.match(prompt, /git diff/);
+});
+
+test("composeNodePrompt leaves shell command prompts unchanged", () => {
+  const prompt = composeNodePrompt(
+    shellNode("test", "pnpm test"),
+    shellProvider,
+    [["worker", "large report"]],
+  );
+
+  assert.equal(prompt, "pnpm test");
+});
 
 test(
   "PlanExecutor runs a sequential 2-node plan via real shell PTYs",

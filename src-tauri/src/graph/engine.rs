@@ -1,7 +1,7 @@
 use super::types::{ExecutionMode, ExecutionPlan, NodeConfig};
 use crate::pty::{
     manager::{PtyManager, PtyTask},
-    providers::load_provider_configs,
+    providers::{ProviderConfig, ProviderDisplayMode, load_provider_configs},
 };
 use crate::review::{HumanReviewDecision, HumanReviewRegistry};
 use serde::Serialize;
@@ -260,7 +260,7 @@ fn dispatch_node(
     app: &AppHandle,
     pty_manager: &PtyManager,
     review_registry: &HumanReviewRegistry,
-    providers: &HashMap<String, crate::pty::providers::ProviderConfig>,
+    providers: &HashMap<String, ProviderConfig>,
     run_id: &str,
     node: &NodeConfig,
     upstream: &HashMap<String, Vec<String>>,
@@ -270,26 +270,29 @@ fn dispatch_node(
         "collector:result" => run_collector(app, run_id, node, upstream, outputs),
         "orchestrator:pipeline" => run_pipeline_sync(app, run_id, node, upstream, outputs),
         "reviewer:human" => run_human_review(app, review_registry, run_id, node, upstream, outputs),
-        _ => run_pty_node(app, pty_manager, providers, run_id, node),
+        _ => run_pty_node(app, pty_manager, providers, run_id, node, upstream, outputs),
     }
 }
 
 fn run_pty_node(
     app: &AppHandle,
     pty_manager: &PtyManager,
-    providers: &HashMap<String, crate::pty::providers::ProviderConfig>,
+    providers: &HashMap<String, ProviderConfig>,
     _run_id: &str,
     node: &NodeConfig,
+    upstream: &HashMap<String, Vec<String>>,
+    outputs: &Mutex<HashMap<String, String>>,
 ) -> Result<String, String> {
     let provider = providers
         .get(&node.provider)
         .cloned()
         .ok_or_else(|| format!("unknown provider for node {}: {}", node.id, node.provider))?;
+    let upstream_outputs = collect_upstream_outputs(&node.id, upstream, outputs);
 
     let task = PtyTask {
         node_id: Some(node.id.clone()),
         provider: node.provider.clone(),
-        prompt: node.prompt.clone(),
+        prompt: compose_pty_prompt(node, &provider, &upstream_outputs),
         workdir: node.workdir.clone(),
         env: node.env.clone(),
         timeout_ms: node.timeout_ms,
@@ -312,6 +315,49 @@ fn run_pty_node(
             outcome.truncated,
         ))
     }
+}
+
+fn provider_is_agent(provider: &ProviderConfig) -> bool {
+    if provider.display_mode == Some(ProviderDisplayMode::Agent) {
+        return true;
+    }
+
+    let identity = format!("{} {}", provider.name, provider.command).to_lowercase();
+    ["claude", "croxy", "codex", "cursor"]
+        .iter()
+        .any(|needle| identity.contains(needle))
+}
+
+fn should_attach_upstream_to_prompt(node: &NodeConfig, provider: &ProviderConfig) -> bool {
+    match node.node_type.as_str() {
+        "reviewer:llm" => true,
+        "worker:pty" => provider_is_agent(provider),
+        _ => false,
+    }
+}
+
+fn compose_pty_prompt(
+    node: &NodeConfig,
+    provider: &ProviderConfig,
+    upstream_outputs: &[(String, String)],
+) -> String {
+    if upstream_outputs.is_empty() || !should_attach_upstream_to_prompt(node, provider) {
+        return node.prompt.clone();
+    }
+
+    let mut prompt = node.prompt.trim_end().to_string();
+    if !prompt.is_empty() {
+        prompt.push_str("\n\n");
+    }
+    prompt.push_str(
+        "---\n\
+Upstream node outputs are included below.\n\
+If this task involves code work, the current working directory is the source of truth. \
+Inspect `git status` and `git diff` yourself before reviewing or changing code; use the upstream text as context, not as a substitute for the filesystem.\n\n\
+Upstream outputs:\n",
+    );
+    prompt.push_str(&merge_upstream_text(upstream_outputs));
+    prompt
 }
 
 fn collect_upstream_outputs(
@@ -474,9 +520,13 @@ fn run_human_review(
 
 #[cfg(test)]
 mod tests {
-    use super::topological_batches;
+    use super::{compose_pty_prompt, topological_batches};
     use crate::graph::types::{ExecutionMode, ExecutionPlan, GraphEdge, NodeConfig};
-    use std::collections::HashMap;
+    use crate::pty::providers::{
+        DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_SETTLE_MS, ProviderConfig, ProviderDisplayMode,
+        ProviderInputMode,
+    };
+    use std::collections::{BTreeMap, HashMap};
 
     fn node(id: &str) -> NodeConfig {
         NodeConfig {
@@ -487,6 +537,26 @@ mod tests {
             workdir: None,
             env: HashMap::new(),
             timeout_ms: None,
+        }
+    }
+
+    fn provider(name: &str, display_mode: Option<ProviderDisplayMode>) -> ProviderConfig {
+        ProviderConfig {
+            name: name.to_string(),
+            provider_type: "pty".to_string(),
+            command: name.to_string(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            completion_pattern: String::new(),
+            error_pattern: String::new(),
+            input_mode: ProviderInputMode::AppendArg,
+            display_mode,
+            cols: 80,
+            rows: 24,
+            completion_timeout_ms: 1000,
+            idle_timeout_ms: 1000,
+            settle_ms: DEFAULT_SETTLE_MS,
+            max_output_bytes: DEFAULT_MAX_OUTPUT_BYTES,
         }
     }
 
@@ -531,5 +601,60 @@ mod tests {
         };
 
         assert!(topological_batches(&plan).unwrap_err().contains("cycle"));
+    }
+
+    #[test]
+    fn reviewer_llm_prompt_includes_upstream_outputs_and_code_review_guidance() {
+        let mut reviewer = node("review");
+        reviewer.node_type = "reviewer:llm".to_string();
+        reviewer.provider = "croxy".to_string();
+        reviewer.prompt = "Review the result.".to_string();
+        let upstream_outputs = vec![("worker".to_string(), "changed src/main.ts".to_string())];
+
+        let prompt = compose_pty_prompt(
+            &reviewer,
+            &provider("croxy", Some(ProviderDisplayMode::Agent)),
+            &upstream_outputs,
+        );
+
+        assert!(prompt.contains("Review the result."));
+        assert!(prompt.contains("[worker]\nchanged src/main.ts"));
+        assert!(prompt.contains("git status"));
+        assert!(prompt.contains("git diff"));
+    }
+
+    #[test]
+    fn shell_worker_prompt_does_not_attach_upstream_text() {
+        let mut shell = node("shell");
+        shell.node_type = "worker:shell".to_string();
+        shell.provider = "shell".to_string();
+        shell.prompt = "pnpm test".to_string();
+        let upstream_outputs = vec![("worker".to_string(), "large report".to_string())];
+
+        let prompt = compose_pty_prompt(
+            &shell,
+            &provider("shell", Some(ProviderDisplayMode::Terminal)),
+            &upstream_outputs,
+        );
+
+        assert_eq!(prompt, "pnpm test");
+    }
+
+    #[test]
+    fn agent_worker_prompt_includes_upstream_outputs() {
+        let mut worker = node("agent-worker");
+        worker.node_type = "worker:pty".to_string();
+        worker.provider = "codex".to_string();
+        worker.prompt = "Continue the task.".to_string();
+        let upstream_outputs = vec![("planner".to_string(), "plan details".to_string())];
+
+        let prompt = compose_pty_prompt(
+            &worker,
+            &provider("codex", Some(ProviderDisplayMode::Agent)),
+            &upstream_outputs,
+        );
+
+        assert!(prompt.contains("Continue the task."));
+        assert!(prompt.contains("[planner]\nplan details"));
     }
 }

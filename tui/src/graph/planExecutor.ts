@@ -23,6 +23,8 @@ export interface PlanExecutorOptions {
   projectRoot?: string;
 }
 
+type UpstreamOutput = [nodeId: string, result: string];
+
 export function resolveNodeWorkdir(
   workdir: string | null | undefined,
   projectRoot?: string,
@@ -34,6 +36,62 @@ export function resolveNodeWorkdir(
   return path.isAbsolute(workdir) ? workdir : path.resolve(baseRoot, workdir);
 }
 
+function buildUpstreamMap(plan: ExecutionPlan): Map<string, string[]> {
+  const upstream = new Map<string, string[]>();
+  for (const edge of plan.edges) {
+    const parents = upstream.get(edge.to) ?? [];
+    parents.push(edge.from);
+    upstream.set(edge.to, parents);
+  }
+  return upstream;
+}
+
+function mergeUpstreamText(parts: UpstreamOutput[]): string {
+  return parts.map(([id, result]) => `[${id}]\n${result}`).join("\n\n");
+}
+
+function providerIsAgent(provider: ProviderConfig): boolean {
+  if (provider.display_mode === "agent") {
+    return true;
+  }
+  const identity = `${provider.name} ${provider.command}`.toLowerCase();
+  return ["claude", "croxy", "codex", "cursor"].some((needle) =>
+    identity.includes(needle),
+  );
+}
+
+function shouldAttachUpstreamToPrompt(
+  node: NodeConfig,
+  provider: ProviderConfig,
+): boolean {
+  if (node.type === "reviewer:llm") {
+    return true;
+  }
+  return node.type === "worker:pty" && providerIsAgent(provider);
+}
+
+export function composeNodePrompt(
+  node: NodeConfig,
+  provider: ProviderConfig,
+  upstreamOutputs: UpstreamOutput[],
+): string {
+  if (
+    upstreamOutputs.length === 0 ||
+    !shouldAttachUpstreamToPrompt(node, provider)
+  ) {
+    return node.prompt;
+  }
+
+  const prefix = node.prompt.trimEnd();
+  const separator = prefix ? "\n\n" : "";
+  return `${prefix}${separator}---
+Upstream node outputs are included below.
+If this task involves code work, the current working directory is the source of truth. Inspect \`git status\` and \`git diff\` yourself before reviewing or changing code; use the upstream text as context, not as a substitute for the filesystem.
+
+Upstream outputs:
+${mergeUpstreamText(upstreamOutputs)}`;
+}
+
 export class PlanExecutor extends EventEmitter {
   readonly runId: string;
   readonly plan: ExecutionPlan;
@@ -41,6 +99,7 @@ export class PlanExecutor extends EventEmitter {
   readonly projectRoot?: string;
   private readonly providers: Map<string, ProviderConfig>;
   private readonly skip: Set<string>;
+  private readonly upstream: Map<string, string[]>;
   private readonly outcomes = new Map<string, PtyOutcome>();
   private readonly skipped: string[] = [];
 
@@ -51,6 +110,7 @@ export class PlanExecutor extends EventEmitter {
     this.projectRoot = options.projectRoot;
     this.providers = options.providers;
     this.skip = options.skip ?? new Set();
+    this.upstream = buildUpstreamMap(options.plan);
     this.multiplexer = new PtyMultiplexer({
       concurrencyLimit: options.concurrencyLimit ?? 2,
     });
@@ -135,10 +195,13 @@ export class PlanExecutor extends EventEmitter {
   }
 
   private async launchNode(node: NodeConfig, provider: ProviderConfig): Promise<void> {
+    const upstreamOutputs = (this.upstream.get(node.id) ?? []).map(
+      (parent) => [parent, this.outcomes.get(parent)?.result ?? ""] as UpstreamOutput,
+    );
     await this.multiplexer.spawn({
       nodeId: node.id,
       provider,
-      prompt: node.prompt,
+      prompt: composeNodePrompt(node, provider, upstreamOutputs),
       workdir: resolveNodeWorkdir(node.workdir, this.projectRoot),
       env: node.env,
       timeoutMs: node.timeout_ms ?? null,

@@ -100,6 +100,10 @@ where
         self.turn_active
     }
 
+    pub fn is_waiting_for_tool_result(&self) -> bool {
+        self.turn_active && self.output.last_stop_reason() == Some("tool_use")
+    }
+
     pub fn pending_len(&self) -> usize {
         self.pending_prompts.len()
     }
@@ -177,6 +181,9 @@ where
                 }
             }
             ClaudeStatus::Idle => {
+                if self.is_waiting_for_tool_result() {
+                    return Ok(());
+                }
                 self.waiting_for_action = false;
                 self.pending_permission_request_id = None;
                 self.output
@@ -654,6 +661,57 @@ mod tests {
         controller.handle_status(ClaudeStatus::Busy, None).unwrap();
         controller.handle_status(ClaudeStatus::Idle, None).unwrap();
         assert_eq!(controller.exit_state(), SessionExit::Requested(0));
+    }
+
+    #[test]
+    fn idle_after_tool_use_waits_for_tool_result() {
+        let mut controller = controller(&["--output-format", "stream-json"]);
+        controller.handle_status(ClaudeStatus::Busy, None).unwrap();
+        for event in [
+            json!({"type":"message_start","message":{"id":"m1","model":"test","content":[]}}),
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_01","name":"Bash"}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"command\":\"printf ok\"}"}}),
+            json!({"type":"content_block_stop","index":0}),
+            json!({"type":"message_delta","delta":{"stop_reason":"tool_use"}}),
+            json!({"type":"message_stop"}),
+        ] {
+            controller.handle_observation(sse(event)).unwrap();
+        }
+
+        controller.handle_status(ClaudeStatus::Idle, None).unwrap();
+
+        assert!(controller.is_turn_active());
+        assert!(controller.is_waiting_for_tool_result());
+        assert_eq!(controller.exit_state(), SessionExit::Running);
+        let lines = parsed_lines(&controller.writer);
+        assert!(!lines.iter().any(|line| line["type"] == "result"));
+    }
+
+    #[test]
+    fn transcript_tool_result_is_forwarded() {
+        let mut controller = controller(&["--output-format", "stream-json"]);
+        controller
+            .handle_transcript_event(json!({
+                "type": "user",
+                "session_id": "sess-1",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_01",
+                            "content": "ok",
+                            "is_error": false
+                        }
+                    ]
+                }
+            }))
+            .unwrap();
+
+        let lines = parsed_lines(&controller.writer);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["type"], "user");
+        assert_eq!(lines[0]["message"]["content"][0]["type"], "tool_result");
     }
 
     #[test]
