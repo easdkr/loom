@@ -10,6 +10,7 @@ export { Toolbar } from "./Toolbar";
 export type { ToolbarItem } from "./Toolbar";
 export { EmptyWorkspace } from "./EmptyWorkspace";
 export { TabBar } from "./TabBar";
+export { WorkspaceSidebar } from "./WorkspaceSidebar";
 export { Statusbar, StatusbarSpacer } from "./Statusbar";
 export { AgentNodeShell } from "./AgentNodeShell";
 export type { AgentNodeStatus } from "./AgentNodeShell";

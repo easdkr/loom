@@ -17,8 +17,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@xyflow/react/dist/style.css";
 
-import { useExecutionStore, useGraphStore, type GraphEdge } from "@stores/index";
-import { Button } from "@design/components";
+import { useExecutionStore, useGraphStore, useWorkspaceStore, type GraphEdge } from "@stores/index";
+import { Button, IconButton } from "@design/components";
 import AgentFlowNode, { type AgentFlowNodeData } from "./AgentFlowNode";
 import { PALETTE, type PaletteEntry } from "./node-catalog";
 
@@ -71,28 +71,41 @@ function GraphCanvasInner() {
   const upsertNode = useGraphStore((state) => state.upsertNode);
   const selectNode = useGraphStore((state) => state.selectNode);
   const perNode = useExecutionStore((state) => state.perNode);
+  const activeProjectId = useWorkspaceStore((state) => state.activeWorkspaceId);
+  const activeProject = useWorkspaceStore((state) =>
+    state.projects.find((project) => project.id === activeProjectId),
+  );
+  const repositories = useWorkspaceStore((state) => state.repositories);
   const { fitView } = useReactFlow();
   const hasAutoFitRef = useRef(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
 
   const flowNodes = useMemo<FlowNode[]>(
     () =>
-      graphNodes.map((node, index) => ({
-        id: node.id,
-        type: "agent",
-        position: isUsablePosition(node.position) ? node.position : gridPosition(index),
-        initialWidth: 280,
-        initialHeight: 120,
-        data: {
-          type: node.type,
-          meta: node.meta,
-          provider: node.provider,
-          prompt: node.prompt,
-          skipped: node.skipped,
-          status: perNode[node.id]?.status ?? "idle",
-        },
-      })),
-    [graphNodes, perNode],
+      graphNodes.map((node, index) => {
+        const repoId = node.repoId ?? activeProject?.activeRepoId ?? null;
+        const binding = activeProject?.repoBindings.find((item) => item.repoId === repoId);
+        const repository = repositories.find((item) => item.id === repoId);
+        return {
+          id: node.id,
+          type: "agent",
+          position: isUsablePosition(node.position) ? node.position : gridPosition(index),
+          initialWidth: 280,
+          initialHeight: 120,
+          data: {
+            type: node.type,
+            meta: node.meta,
+            provider: node.provider,
+            prompt: node.prompt,
+            skipped: node.skipped,
+            status: perNode[node.id]?.status ?? "idle",
+            repoName: repository?.name,
+            repoBranch: binding?.branch,
+            worktreePolicy: node.worktreePolicy ?? "workspace",
+          },
+        };
+      }),
+    [activeProject, graphNodes, perNode, repositories],
   );
 
   const flowEdges = useMemo(() => graphEdges.map(toFlowEdge), [graphEdges]);
@@ -287,15 +300,25 @@ function GraphCanvasInner() {
             </div>
           ) : null}
         </div>
-        <Button variant="ghost" size="sm" onClick={fitGraph} disabled={graphNodes.length === 0}>
-          Fit
-        </Button>
-        <Button variant="ghost" size="sm" onClick={reflowGraph} disabled={graphNodes.length === 0}>
-          Reflow
-        </Button>
-        <Button variant="primary" size="sm" onClick={addStarterGraph}>
-          Starter graph
-        </Button>
+        <IconButton
+          aria-label="Fit graph"
+          title="Fit graph"
+          onClick={fitGraph}
+          disabled={graphNodes.length === 0}
+        >
+          ⛶
+        </IconButton>
+        <IconButton
+          aria-label="Reflow graph"
+          title="Reflow graph"
+          onClick={reflowGraph}
+          disabled={graphNodes.length === 0}
+        >
+          ⇄
+        </IconButton>
+        <IconButton aria-label="Add starter graph" title="Starter graph" onClick={addStarterGraph}>
+          ⎇
+        </IconButton>
       </div>
       <ReactFlow
         nodes={flowNodes}

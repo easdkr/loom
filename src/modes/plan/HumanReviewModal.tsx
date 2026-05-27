@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { splitProjectScopedId } from "@core/index";
 import { Badge, Button, Field, IconButton, Textarea } from "@design/components";
+import { getExecutionStore, useExecutionStore, useWorkspaceStore } from "@stores/index";
 
 interface HumanReviewUpstream {
   node_id: string;
@@ -16,7 +18,11 @@ interface HumanReviewRequest {
 }
 
 function HumanReviewModal() {
-  const [request, setRequest] = useState<HumanReviewRequest | null>(null);
+  const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
+  const request = useExecutionStore((state) => state.pendingHumanReview);
+  const open = useExecutionStore((state) => state.humanReviewOpen);
+  const setPendingHumanReview = useExecutionStore((state) => state.setPendingHumanReview);
+  const setHumanReviewOpen = useExecutionStore((state) => state.setHumanReviewOpen);
   const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -26,7 +32,18 @@ function HumanReviewModal() {
     let unlisten: UnlistenFn | undefined;
 
     listen<HumanReviewRequest>("graph:human-review-required", (event) => {
-      setRequest(event.payload);
+      const { projectId, localId } = splitProjectScopedId(event.payload.node_id);
+      const targetProjectId = projectId || activeWorkspaceId;
+      if (!targetProjectId) {
+        return;
+      }
+      getExecutionStore(targetProjectId).getState().setPendingHumanReview({
+        nodeId: localId,
+        fullNodeId: event.payload.node_id,
+        prompt: event.payload.prompt,
+        upstream: event.payload.upstream,
+        requestedAt: Date.now(),
+      });
       setNote("");
       setReason("");
     })
@@ -43,9 +60,9 @@ function HumanReviewModal() {
       cancelled = true;
       unlisten?.();
     };
-  }, []);
+  }, [activeWorkspaceId]);
 
-  if (!request) {
+  if (!request || !open) {
     return null;
   }
 
@@ -54,9 +71,9 @@ function HumanReviewModal() {
     setSubmitting(true);
     try {
       await invoke("node_approve", {
-        request: { node_id: request.node_id, note: note.trim() || null },
+        request: { node_id: request.fullNodeId, note: note.trim() || null },
       });
-      setRequest(null);
+      setPendingHumanReview(null);
     } finally {
       setSubmitting(false);
     }
@@ -68,11 +85,11 @@ function HumanReviewModal() {
     try {
       await invoke("node_reject", {
         request: {
-          node_id: request.node_id,
+          node_id: request.fullNodeId,
           reason: reason.trim() || "rejected by reviewer",
         },
       });
-      setRequest(null);
+      setPendingHumanReview(null);
     } finally {
       setSubmitting(false);
     }
@@ -87,9 +104,9 @@ function HumanReviewModal() {
     >
       <div className="plan-review-sheet plan-review-sheet--human">
         <header className="plan-review-header">
-          <span className="plan-review-title">사람 검토 대기 — {request.node_id}</span>
+          <span className="plan-review-title">사람 검토 대기 — {request.nodeId}</span>
           <Badge tone="warning">paused</Badge>
-          <IconButton aria-label="Defer" onClick={() => setRequest(null)}>
+          <IconButton aria-label="Defer" onClick={() => setHumanReviewOpen(false)}>
             ✕
           </IconButton>
         </header>

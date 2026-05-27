@@ -99,13 +99,13 @@ export function disposeGraphStore(projectId: string): void {
 }
 
 function getActiveGraphStore(): GraphStoreApi {
-  const activeId = useWorkspaceStore.getState().activeTabId;
+  const activeId = useWorkspaceStore.getState().activeWorkspaceId;
   return activeId ? getGraphStore(activeId) : emptyGraphStore;
 }
 
 export const useGraphStore = Object.assign(
   function useGraphStoreSelector<T>(selector: (state: GraphState) => T): T {
-    const activeId = useWorkspaceStore((state) => state.activeTabId);
+    const activeId = useWorkspaceStore((state) => state.activeWorkspaceId);
     const store = activeId ? getGraphStore(activeId) : emptyGraphStore;
     return useStore(store, selector);
   },

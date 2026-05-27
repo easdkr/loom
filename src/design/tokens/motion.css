@@ -45,10 +45,10 @@
 @keyframes pulse-warning {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(232, 184, 92, 0.4);
+    box-shadow: 0 0 0 0 rgba(255, 122, 89, 0.4);
   }
   50% {
-    box-shadow: 0 0 0 4px rgba(232, 184, 92, 0);
+    box-shadow: 0 0 0 4px rgba(255, 122, 89, 0);
   }
 }
 

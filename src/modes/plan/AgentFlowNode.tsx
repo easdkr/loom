@@ -9,6 +9,9 @@ export interface AgentFlowNodeData extends Record<string, unknown> {
   prompt: string;
   status: AgentNodeStatus;
   skipped?: boolean;
+  repoName?: string;
+  repoBranch?: string;
+  worktreePolicy?: "workspace" | "node-isolated";
 }
 
 function AgentFlowNode({ data, selected }: NodeProps) {
@@ -22,8 +25,23 @@ function AgentFlowNode({ data, selected }: NodeProps) {
         meta={node.meta}
         status={status}
         selected={selected}
-        badge={<Badge tone="neutral">{node.provider}</Badge>}
-        footer={<span>{node.type}</span>}
+        badge={
+          <span className="ds-agent-node-badges">
+            <Badge tone="neutral" title={node.provider}>{node.provider}</Badge>
+            {node.repoName ? (
+              <Badge tone="info" title={node.repoBranch ? `${node.repoName} · ${node.repoBranch}` : node.repoName}>
+                {node.repoName}
+              </Badge>
+            ) : null}
+            {node.worktreePolicy === "node-isolated" ? <Badge tone="accent">isolated</Badge> : null}
+          </span>
+        }
+        footer={
+          <>
+            <span>{node.type}</span>
+            {node.repoBranch ? <span className="ds-agent-node-footer-meta">{node.repoBranch}</span> : null}
+          </>
+        }
       >
         <p className="ds-agent-node-prompt">{node.prompt || "(prompt 없음)"}</p>
       </AgentNodeShell>

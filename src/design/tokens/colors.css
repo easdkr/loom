@@ -35,20 +35,20 @@
   /* Semantic */
   --success-default: #6fcf8e;
   --success-muted: #2c4a35;
-  --warning-default: #e8b85c;
-  --warning-muted: #5a4422;
+  --warning-default: #ff7a59; /* premium coral orange */
+  --warning-muted: #3d1a10;
   --danger-default: #e87878;
   --danger-muted: #5a2a2a;
   --info-default: #7ca8e0;
   --info-muted: #2a3a55;
   --neutral-default: #888894;
 
-  /* Node category stripes — desaturated, same lightness band */
-  --node-orchestrator: #8478a8;
-  --node-worker: #7898b8;
-  --node-collector: #7eaa98;
-  --node-reviewer: #b89884;
-  --node-router: #909098;
+  /* Node category stripes — mapped directly to semantic variables for color unification */
+  --node-orchestrator: var(--accent-default);
+  --node-worker: var(--info-default);
+  --node-collector: var(--success-default);
+  --node-reviewer: var(--warning-default);
+  --node-router: var(--neutral-default);
 
   /* Focus ring */
   --focus-ring: #4ec9b0;
@@ -58,6 +58,11 @@
   --terminal-fg: #d4d4d8;
   --terminal-cursor: #4ec9b0;
   --terminal-selection: rgba(52, 52, 60, 0.4);
+
+  /* Shadows / overlays */
+  --shadow-panel: 0 var(--space-2) var(--space-6) rgba(0, 0, 0, 0.4);
+  --shadow-popover: 0 var(--space-4) var(--space-12) rgba(0, 0, 0, 0.5);
+  --scrim-overlay: rgba(10, 10, 12, 0.65); /* semi-transparent backdrop */
 }
 
 [data-theme="light"] {
@@ -80,7 +85,8 @@
   --accent-muted: #d4ece4;
 
   --success-default: #3a9a5c;
-  --warning-default: #b8841c;
+  --warning-default: #e65100; /* light sunset orange */
   --danger-default: #c44848;
   --info-default: #4878b8;
+  --scrim-overlay: rgba(250, 250, 248, 0.65); /* light semi-transparent backdrop */
 }
