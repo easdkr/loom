@@ -457,6 +457,11 @@ fn events_from_stream_json(session_id: EngineSessionId, value: &Value) -> Vec<En
                     .and_then(Value::as_str)
                     .map(str::to_string),
             }),
+            Some("api_error") | Some("api_retry") => events.push(EngineEvent::StatusChanged {
+                session_id,
+                status: "retrying".to_string(),
+                waiting_for: Some(api_retry_activity(value)),
+            }),
             Some("session_state_changed") => events.push(EngineEvent::StatusChanged {
                 session_id,
                 status: value
@@ -524,6 +529,36 @@ fn events_from_stream_json(session_id: EngineSessionId, value: &Value) -> Vec<En
         _ => {}
     }
     events
+}
+
+fn api_retry_activity(value: &Value) -> String {
+    let attempt = value
+        .get("retryAttempt")
+        .or_else(|| value.get("retry_attempt"))
+        .and_then(Value::as_u64);
+    let max = value
+        .get("maxRetries")
+        .or_else(|| value.get("max_retries"))
+        .and_then(Value::as_u64);
+    let cause = value
+        .pointer("/cause/code")
+        .or_else(|| value.pointer("/error/cause/code"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            value
+                .get("status_code")
+                .and_then(Value::as_u64)
+                .map(|_| "HTTP")
+        });
+    let suffix = match (attempt, max) {
+        (Some(attempt), Some(max)) => format!(" {attempt}/{max}"),
+        (Some(attempt), None) => format!(" {attempt}"),
+        _ => String::new(),
+    };
+    match cause {
+        Some(cause) => format!("API retry{suffix}: {cause}"),
+        None => format!("API retry{suffix}"),
+    }
 }
 
 fn append_stream_event(session_id: EngineSessionId, event: &Value, events: &mut Vec<EngineEvent>) {
@@ -648,6 +683,31 @@ mod tests {
                 session_id: id,
                 is_error: false,
                 result: "done".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn api_retry_system_events_keep_engine_waiting() {
+        let id = EngineSessionId(11);
+
+        let retry = events_from_stream_json(
+            id,
+            &json!({
+                "type": "system",
+                "subtype": "api_error",
+                "cause": { "code": "ConnectionRefused" },
+                "retryAttempt": 2,
+                "maxRetries": 10
+            }),
+        );
+
+        assert_eq!(
+            retry,
+            vec![EngineEvent::StatusChanged {
+                session_id: id,
+                status: "retrying".to_string(),
+                waiting_for: Some("API retry 2/10: ConnectionRefused".to_string()),
             }]
         );
     }

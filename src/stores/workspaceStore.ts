@@ -45,6 +45,10 @@ interface WorkspaceRemoveResponse {
   registry: WorkspaceRegistryV3;
 }
 
+interface WorkspaceWorktreeRemoveResponse {
+  registry: WorkspaceRegistryV3;
+}
+
 type ParsedWorkspace = V1WorkspacePayload | WorkspaceRegistryV2 | WorkspaceRegistryV3;
 
 export interface WorkspaceState {
@@ -73,6 +77,12 @@ export interface WorkspaceState {
   closeOtherTabs: (id: string) => void;
   removeProject: (id: string) => void;
   removeWorkspace: (id: string, force?: boolean) => Promise<void>;
+  removeWorkspaceWorktree: (
+    workspaceId: string,
+    repoId: string,
+    worktreePath: string,
+    force?: boolean,
+  ) => Promise<void>;
   renameProject: (id: string, name: string) => void;
   reorderTabs: (nextOrder: string[]) => void;
   setActiveTab: (id: string) => void;
@@ -484,6 +494,18 @@ export const useWorkspaceStore: UseBoundStore<StoreApi<WorkspaceState>> = create
   removeWorkspace: async (id, force = false) => {
     const response = await invoke<WorkspaceRemoveResponse>("workspace_remove", {
       request: { workspace_id: id, force },
+    });
+    set(applyRegistry(response.registry));
+  },
+
+  removeWorkspaceWorktree: async (workspaceId, repoId, worktreePath, force = false) => {
+    const response = await invoke<WorkspaceWorktreeRemoveResponse>("workspace_worktree_remove", {
+      request: {
+        workspace_id: workspaceId,
+        repo_id: repoId,
+        worktree_path: worktreePath,
+        force,
+      },
     });
     set(applyRegistry(response.registry));
   },

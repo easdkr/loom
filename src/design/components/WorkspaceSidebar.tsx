@@ -12,10 +12,18 @@ import {
 import { Badge } from "./Badge";
 import { IconButton } from "./Button";
 import {
+  ALL_REPOSITORIES_FILTER_ID,
+  buildRepositoryWorktreeView,
   groupWorkspaceEntries,
+  parseWorkspaceSidebarViewMode,
   WORKSPACE_STATUS_LABEL,
   WORKSPACE_STATUS_ORDER,
+  WORKSPACE_SIDEBAR_VIEW_STORAGE_KEY,
+  workspaceDirtyKey,
+  type RepositoryWorktreeEntry,
+  type RepositoryWorktreeView,
   type WorkspaceStatusEntry,
+  type WorkspaceSidebarViewMode,
 } from "./workspaceSidebarModel";
 
 interface WorkspaceStatusResponse {
@@ -34,6 +42,18 @@ function relativeTimeLabel(timestamp: number): string {
   if (elapsed < hour) return `${Math.floor(elapsed / minute)}m`;
   if (elapsed < day) return `${Math.floor(elapsed / hour)}h`;
   return `${Math.floor(elapsed / day)}d`;
+}
+
+function shortenedPath(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.slice(-3).join("/") || path;
+}
+
+function readInitialViewMode(): WorkspaceSidebarViewMode {
+  if (typeof window === "undefined") {
+    return "status";
+  }
+  return parseWorkspaceSidebarViewMode(window.localStorage.getItem(WORKSPACE_SIDEBAR_VIEW_STORAGE_KEY));
 }
 
 function WorkspaceRow({
@@ -173,8 +193,9 @@ function WorkspaceStatusTracker({
   return null;
 }
 
-function useWorkspaceDirtyState(projects: Project[]): [DirtyState, () => void] {
+function useWorkspaceDirtyState(projects: Project[]): [DirtyState, DirtyState, () => void] {
   const [dirtyState, setDirtyState] = useState<DirtyState>({});
+  const [dirtyByWorktree, setDirtyByWorktree] = useState<DirtyState>({});
 
   function refresh(): void {
     void Promise.all(
@@ -182,17 +203,36 @@ function useWorkspaceDirtyState(projects: Project[]): [DirtyState, () => void] {
         invoke<WorkspaceStatusResponse>("workspace_status", {
           request: { workspace_id: project.id },
         })
-          .then((response) => [response.workspace_id, response.repositories.some((repo) => repo.dirty)] as const)
-          .catch(() => [project.id, false] as const),
+          .then((response) => ({
+            workspaceId: response.workspace_id,
+            repositories: response.repositories,
+            dirty: response.repositories.some((repo) => repo.dirty),
+          }))
+          .catch(() => ({
+            workspaceId: project.id,
+            repositories: [],
+            dirty: false,
+          })),
       ),
-    ).then((entries) => {
-      setDirtyState(Object.fromEntries(entries));
+    ).then((responses) => {
+      setDirtyState(Object.fromEntries(responses.map((response) => [response.workspaceId, response.dirty])));
+      setDirtyByWorktree(
+        Object.fromEntries(
+          responses.flatMap((response) =>
+            response.repositories.map((repo) => [
+              workspaceDirtyKey(response.workspaceId, repo.repo_id, repo.worktree_path),
+              repo.dirty,
+            ]),
+          ),
+        ),
+      );
     });
   }
 
   useEffect(() => {
     if (projects.length === 0) {
       setDirtyState({});
+      setDirtyByWorktree({});
       return;
     }
     refresh();
@@ -200,7 +240,7 @@ function useWorkspaceDirtyState(projects: Project[]): [DirtyState, () => void] {
     return () => window.clearInterval(timer);
   }, [projects.map((project) => project.id).join(":")]);
 
-  return [dirtyState, refresh];
+  return [dirtyState, dirtyByWorktree, refresh];
 }
 
 function StatusBucket({
@@ -251,12 +291,193 @@ function StatusBucket({
   );
 }
 
+function ViewToggle({
+  value,
+  onChange,
+}: {
+  value: WorkspaceSidebarViewMode;
+  onChange: (value: WorkspaceSidebarViewMode) => void;
+}) {
+  return (
+    <div className="workspace-view-toggle" role="tablist" aria-label="Workspace sidebar view">
+      {(["status", "repository"] as const).map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          className="workspace-view-toggle-item"
+          data-active={value === mode ? "true" : "false"}
+          onClick={() => onChange(mode)}
+        >
+          {mode === "status" ? "Status" : "Repos"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function RepositoryChipBar({
+  view,
+  onSelect,
+}: {
+  view: RepositoryWorktreeView;
+  onSelect: (repoId: string) => void;
+}) {
+  return (
+    <div className="repository-chip-row" aria-label="Repository filter">
+      {view.chips.map((chip) => (
+        <button
+          key={chip.id}
+          type="button"
+          className="repository-chip"
+          data-active={view.selectedRepositoryId === chip.id ? "true" : "false"}
+          onClick={() => onSelect(chip.id)}
+        >
+          <span className="repository-chip-label">{chip.label}</span>
+          <span className="repository-chip-count">{chip.worktreeCount}</span>
+          {chip.running ? <span className="repository-chip-dot" data-tone="running" title="Running" /> : null}
+          {chip.dirty ? <span className="repository-chip-dot" data-tone="dirty" title="Dirty" /> : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function WorktreeRow({
+  entry,
+  active,
+  onDeleted,
+}: {
+  entry: RepositoryWorktreeEntry;
+  active: boolean;
+  onDeleted: () => void;
+}) {
+  const openWorkspace = useWorkspaceStore((state) => state.openWorkspace);
+  const setActiveWorkspace = useWorkspaceStore((state) => state.setActiveWorkspace);
+  const setActiveRepository = useWorkspaceStore((state) => state.setActiveRepository);
+  const removeWorkspaceWorktree = useWorkspaceStore((state) => state.removeWorkspaceWorktree);
+  const statusLabel = WORKSPACE_STATUS_LABEL[entry.status];
+
+  function activate(): void {
+    openWorkspace(entry.workspace.id);
+    setActiveWorkspace(entry.workspace.id);
+    setActiveRepository(entry.workspace.id, entry.binding.repoId);
+    if (entry.status === "review") {
+      getExecutionStore(entry.workspace.id).getState().setHumanReviewOpen(true);
+    }
+  }
+
+  async function removeWorktree(): Promise<void> {
+    const confirmed = window.confirm(
+      `${entry.workspace.name} worktree를 제거할까요?\n\n${entry.binding.worktreePath}\n\nworktree 디렉터리와 local branch가 삭제됩니다.`,
+    );
+    if (!confirmed) return;
+    try {
+      await removeWorkspaceWorktree(
+        entry.workspace.id,
+        entry.binding.repoId,
+        entry.binding.worktreePath,
+        false,
+      );
+      onDeleted();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const forceConfirmed = window.confirm(`${message}\n\n강제로 제거할까요?`);
+      if (!forceConfirmed) return;
+      try {
+        await removeWorkspaceWorktree(
+          entry.workspace.id,
+          entry.binding.repoId,
+          entry.binding.worktreePath,
+          true,
+        );
+        onDeleted();
+      } catch (forceError) {
+        window.alert(forceError instanceof Error ? forceError.message : String(forceError));
+      }
+    }
+  }
+
+  return (
+    <div className="worktree-row-shell" data-active={active ? "true" : "false"}>
+      <button
+        type="button"
+        className="worktree-row"
+        data-status={entry.status}
+        title={entry.binding.worktreePath}
+        onClick={activate}
+      >
+        <span className="workspace-row-stripe" aria-hidden />
+        <span
+          className="workspace-row-status"
+          title={statusLabel}
+          aria-label={`Status: ${statusLabel}`}
+        />
+        <span className="workspace-row-main">
+          <span className="workspace-row-name">{entry.workspace.name}</span>
+          <span className="workspace-row-meta">
+            {entry.binding.branch} · {shortenedPath(entry.binding.worktreePath)}
+          </span>
+        </span>
+        <span className="workspace-row-badges">
+          {entry.showRepositoryBadge ? <Badge tone="neutral">{entry.repository?.name ?? entry.binding.repoId}</Badge> : null}
+          <Badge tone={entry.workspace.mode === "plan" ? "accent" : "neutral"}>{entry.workspace.mode ?? "plan"}</Badge>
+          {entry.dirty ? <span className="workspace-row-dirty" title="Dirty worktree">dirty</span> : null}
+        </span>
+        <span className="workspace-row-time">{relativeTimeLabel(entry.workspace.lastOpenedAt)}</span>
+      </button>
+      {entry.binding.bindingKind === "worktree" ? (
+        <div className="workspace-row-actions">
+          <IconButton
+            aria-label={`Remove ${entry.workspace.name} worktree`}
+            title="Remove worktree"
+            onClick={() => void removeWorktree()}
+          >
+            -
+          </IconButton>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RepositoryDeck({
+  view,
+  activeWorkspaceId,
+  onSelectRepository,
+  onDeleted,
+}: {
+  view: RepositoryWorktreeView;
+  activeWorkspaceId: string | null;
+  onSelectRepository: (repoId: string) => void;
+  onDeleted: () => void;
+}) {
+  return (
+    <div className="repository-deck">
+      <RepositoryChipBar view={view} onSelect={onSelectRepository} />
+      <div className="worktree-list">
+        {view.entries.map((entry) => (
+          <WorktreeRow
+            key={`${entry.workspace.id}:${entry.binding.repoId}:${entry.binding.worktreePath}`}
+            entry={entry}
+            active={activeWorkspaceId === entry.workspace.id && entry.workspace.activeRepoId === entry.binding.repoId}
+            onDeleted={onDeleted}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function WorkspaceSidebar() {
   const projects = useWorkspaceStore((state) => state.projects);
+  const repositories = useWorkspaceStore((state) => state.repositories);
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
   const pickAndAddProject = useWorkspaceStore((state) => state.pickAndAddProject);
   const cloneRepository = useWorkspaceStore((state) => state.cloneRepository);
-  const [dirtyState, refreshDirtyState] = useWorkspaceDirtyState(projects);
+  const createWorkspace = useWorkspaceStore((state) => state.createWorkspace);
+  const [viewMode, setViewMode] = useState<WorkspaceSidebarViewMode>(readInitialViewMode);
+  const [selectedRepositoryId, setSelectedRepositoryId] = useState(ALL_REPOSITORIES_FILTER_ID);
+  const [dirtyState, dirtyByWorktree, refreshDirtyState] = useWorkspaceDirtyState(projects);
   const [statusByProject, setStatusByProject] = useState<Record<string, WorkspaceDerivedStatus>>({});
   const statusEntries = useMemo<WorkspaceStatusEntry[]>(
     () =>
@@ -267,6 +488,44 @@ export function WorkspaceSidebar() {
     [projects, statusByProject],
   );
   const grouped = useMemo(() => groupWorkspaceEntries(statusEntries), [statusEntries]);
+  const repositoryView = useMemo(
+    () =>
+      buildRepositoryWorktreeView({
+        projects,
+        repositories,
+        selectedRepositoryId,
+        dirtyByWorktree,
+        statusByProject,
+      }),
+    [dirtyByWorktree, projects, repositories, selectedRepositoryId, statusByProject],
+  );
+
+  useEffect(() => {
+    window.localStorage.setItem(WORKSPACE_SIDEBAR_VIEW_STORAGE_KEY, viewMode);
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (repositoryView.selectedRepositoryId !== selectedRepositoryId) {
+      setSelectedRepositoryId(repositoryView.selectedRepositoryId);
+    }
+  }, [repositoryView.selectedRepositoryId, selectedRepositoryId]);
+
+  async function createWorktreeForSelectedRepository(): Promise<void> {
+    if (repositoryView.selectedRepositoryId === ALL_REPOSITORIES_FILTER_ID) {
+      return;
+    }
+    const repository = repositories.find((item) => item.id === repositoryView.selectedRepositoryId);
+    const name = window.prompt("Workspace name", repository?.name ? `${repository.name} workspace` : "workspace");
+    if (!name?.trim()) {
+      return;
+    }
+    try {
+      await createWorkspace(name.trim(), [repositoryView.selectedRepositoryId]);
+      refreshDirtyState();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   return (
     <aside className="workspace-sidebar" aria-label="Workspaces">
@@ -282,14 +541,29 @@ export function WorkspaceSidebar() {
         />
       ))}
       <header className="workspace-sidebar-header">
-        <span className="workspace-sidebar-title">Workspaces</span>
+        <span className="workspace-sidebar-title">{viewMode === "repository" ? "Worktrees" : "Workspaces"}</span>
         <div className="workspace-sidebar-actions">
           <IconButton aria-label="Refresh workspace status" title="Refresh" onClick={refreshDirtyState}>
             ↻
           </IconButton>
-          <IconButton aria-label="Add local repository" title="Add local repository" onClick={() => void pickAndAddProject()}>
-            +
-          </IconButton>
+          {viewMode === "repository" ? (
+            <IconButton
+              aria-label="Create worktree"
+              title={
+                repositoryView.selectedRepositoryId === ALL_REPOSITORIES_FILTER_ID
+                  ? "Select a repository first"
+                  : "Create worktree"
+              }
+              disabled={repositoryView.selectedRepositoryId === ALL_REPOSITORIES_FILTER_ID}
+              onClick={() => void createWorktreeForSelectedRepository()}
+            >
+              +
+            </IconButton>
+          ) : (
+            <IconButton aria-label="Add local repository" title="Add local repository" onClick={() => void pickAndAddProject()}>
+              +
+            </IconButton>
+          )}
           <IconButton
             aria-label="Clone repository"
             title="Clone repository"
@@ -305,15 +579,25 @@ export function WorkspaceSidebar() {
         </div>
       </header>
       <div className="workspace-sidebar-body">
-        {WORKSPACE_STATUS_ORDER.map((status, index) => (
-          <StatusBucket
-            key={status}
-            status={status}
-            projects={grouped[index]?.map((entry) => entry.project) ?? []}
+        <ViewToggle value={viewMode} onChange={setViewMode} />
+        {viewMode === "repository" ? (
+          <RepositoryDeck
+            view={repositoryView}
             activeWorkspaceId={activeWorkspaceId}
-            dirtyState={dirtyState}
+            onSelectRepository={setSelectedRepositoryId}
+            onDeleted={refreshDirtyState}
           />
-        ))}
+        ) : (
+          WORKSPACE_STATUS_ORDER.map((status, index) => (
+            <StatusBucket
+              key={status}
+              status={status}
+              projects={grouped[index]?.map((entry) => entry.project) ?? []}
+              activeWorkspaceId={activeWorkspaceId}
+              dirtyState={dirtyState}
+            />
+          ))
+        )}
       </div>
     </aside>
   );
