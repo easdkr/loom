@@ -247,6 +247,82 @@ pub fn remove_workspace(
     Ok(WorkspaceMutationResponse { registry })
 }
 
+pub fn remove_workspace_worktree(
+    workspace_id: &str,
+    repo_id: &str,
+    worktree_path: &str,
+    force: bool,
+) -> Result<WorkspaceMutationResponse, String> {
+    let mut registry = load_v3_registry()?.unwrap_or_else(empty_registry);
+    let workspace_index = registry
+        .workspaces
+        .iter()
+        .position(|item| item.id == workspace_id)
+        .ok_or_else(|| format!("workspace not found: {workspace_id}"))?;
+    let workspace = registry.workspaces[workspace_index].clone();
+    let binding = workspace
+        .repo_bindings
+        .iter()
+        .find(|item| item.repo_id == repo_id && item.worktree_path == worktree_path)
+        .cloned()
+        .ok_or_else(|| format!("worktree binding not found: {repo_id} {worktree_path}"))?;
+
+    if binding.binding_kind != WorkspaceRepoBindingKind::Worktree {
+        return Err("only worktree bindings can be removed".to_string());
+    }
+
+    if !force {
+        let status = git::status_porcelain(&binding.worktree_path)?;
+        if !status.is_empty() {
+            return Err(format!(
+                "worktree has uncommitted changes: {}",
+                binding.worktree_path
+            ));
+        }
+    }
+
+    let repository = registry
+        .repositories
+        .iter()
+        .find(|item| item.id == binding.repo_id)
+        .ok_or_else(|| format!("repository not found: {}", binding.repo_id))?;
+    if !force && !git::branch_is_merged_into_head(&repository.source_root, &binding.branch) {
+        return Err(format!(
+            "branch is not merged and cannot be safely deleted: {}",
+            binding.branch
+        ));
+    }
+
+    git::worktree_remove(&binding.worktree_path, force)?;
+    git::delete_local_branch(&repository.source_root, &binding.branch, force)?;
+
+    if workspace.repo_bindings.len() == 1 {
+        registry
+            .workspaces
+            .retain(|workspace| workspace.id != workspace_id);
+        registry.open_tabs.retain(|id| id != workspace_id);
+        if registry.active_workspace_id.as_deref() == Some(workspace_id) {
+            registry.active_workspace_id = registry.open_tabs.first().cloned();
+        }
+    } else {
+        let workspace = &mut registry.workspaces[workspace_index];
+        workspace
+            .repo_bindings
+            .retain(|item| !(item.repo_id == repo_id && item.worktree_path == worktree_path));
+        if workspace.active_repo_id == repo_id {
+            workspace.active_repo_id = workspace
+                .repo_bindings
+                .first()
+                .map(|item| item.repo_id.clone())
+                .unwrap_or_default();
+        }
+        workspace.last_opened_at = now_millis();
+    }
+
+    save_v3_registry(&registry)?;
+    Ok(WorkspaceMutationResponse { registry })
+}
+
 pub fn workspace_status(workspace_id: &str) -> Result<WorkspaceStatusResponse, String> {
     let registry = load_v3_registry()?.unwrap_or_else(empty_registry);
     let workspace = registry
@@ -461,7 +537,19 @@ fn slugify(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{name_from_git_url, slugify};
+    use super::{
+        WorkspaceRepoBindingKind, create_workspace, name_from_git_url, register_local,
+        remove_workspace_worktree, slugify,
+    };
+    use crate::git;
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::{Mutex, MutexGuard},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    static TEST_HOME_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn git_url_name_strips_suffixes() {
@@ -476,5 +564,215 @@ mod tests {
     fn slugify_keeps_paths_shell_safe() {
         assert_eq!(slugify("Munich V5 / Loom"), "munich-v5-loom");
         assert_eq!(slugify("***"), "workspace");
+    }
+
+    #[test]
+    fn create_workspace_allows_multiple_worktrees_for_same_repository() {
+        let home = test_home("multiple-worktrees");
+        let repo = initialized_repo("multiple-worktrees-repo");
+        let repository = register_local(&repo).expect("register repository");
+
+        let first = create_workspace(
+            "First workspace",
+            &[repository.id.clone()],
+            None,
+            std::slice::from_ref(&repository),
+        )
+        .expect("create first workspace");
+        let second = create_workspace(
+            "Second workspace",
+            &[repository.id.clone()],
+            None,
+            std::slice::from_ref(&repository),
+        )
+        .expect("create second workspace");
+
+        assert_eq!(second.registry.workspaces.len(), 2);
+        let first_path = &first.registry.workspaces[0].repo_bindings[0].worktree_path;
+        let second_path = &second.registry.workspaces[1].repo_bindings[0].worktree_path;
+        assert_ne!(first_path, second_path);
+        assert!(PathBuf::from(first_path).is_dir());
+        assert!(PathBuf::from(second_path).is_dir());
+
+        fs::remove_dir_all(repo).expect("remove repo");
+        fs::remove_dir_all(&home.path).expect("remove home");
+    }
+
+    #[test]
+    fn remove_workspace_worktree_deletes_clean_worktree_and_branch() {
+        let home = test_home("remove-clean");
+        let repo = initialized_repo("remove-clean-repo");
+        let repository = register_local(&repo).expect("register repository");
+        let created = create_workspace(
+            "Clean workspace",
+            &[repository.id.clone()],
+            None,
+            std::slice::from_ref(&repository),
+        )
+        .expect("create workspace");
+        let workspace = &created.registry.workspaces[0];
+        let binding = &workspace.repo_bindings[0];
+        let branch = binding.branch.clone();
+        let worktree_path = binding.worktree_path.clone();
+
+        let response = remove_workspace_worktree(
+            &workspace.id,
+            &binding.repo_id,
+            &binding.worktree_path,
+            false,
+        )
+        .expect("remove worktree");
+
+        assert!(response.registry.workspaces.is_empty());
+        assert!(!PathBuf::from(&worktree_path).exists());
+        assert!(!git::local_branch_exists(&repo, &branch));
+
+        fs::remove_dir_all(repo).expect("remove repo");
+        fs::remove_dir_all(&home.path).expect("remove home");
+    }
+
+    #[test]
+    fn remove_workspace_worktree_blocks_dirty_worktree_without_force() {
+        let home = test_home("remove-dirty");
+        let repo = initialized_repo("remove-dirty-repo");
+        let repository = register_local(&repo).expect("register repository");
+        let created = create_workspace(
+            "Dirty workspace",
+            &[repository.id.clone()],
+            None,
+            std::slice::from_ref(&repository),
+        )
+        .expect("create workspace");
+        let workspace = &created.registry.workspaces[0];
+        let binding = &workspace.repo_bindings[0];
+        fs::write(
+            PathBuf::from(&binding.worktree_path).join("dirty.txt"),
+            "dirty",
+        )
+        .expect("write dirty file");
+
+        let error = remove_workspace_worktree(
+            &workspace.id,
+            &binding.repo_id,
+            &binding.worktree_path,
+            false,
+        )
+        .expect_err("dirty worktree should be blocked");
+
+        assert!(error.contains("uncommitted changes"));
+        assert!(PathBuf::from(&binding.worktree_path).exists());
+
+        remove_workspace_worktree(
+            &workspace.id,
+            &binding.repo_id,
+            &binding.worktree_path,
+            true,
+        )
+        .expect("force remove dirty worktree");
+        fs::remove_dir_all(repo).expect("remove repo");
+        fs::remove_dir_all(&home.path).expect("remove home");
+    }
+
+    #[test]
+    fn remove_workspace_worktree_preserves_workspace_for_partial_binding_delete() {
+        let home = test_home("remove-partial");
+        let first_repo = initialized_repo("remove-partial-first");
+        let second_repo = initialized_repo("remove-partial-second");
+        let first = register_local(&first_repo).expect("register first repository");
+        let second = register_local(&second_repo).expect("register second repository");
+        let created = create_workspace(
+            "Multi repo workspace",
+            &[first.id.clone(), second.id.clone()],
+            None,
+            &[first.clone(), second.clone()],
+        )
+        .expect("create workspace");
+        let workspace = &created.registry.workspaces[0];
+        let first_binding = workspace
+            .repo_bindings
+            .iter()
+            .find(|binding| binding.repo_id == first.id)
+            .expect("first binding");
+
+        let response = remove_workspace_worktree(
+            &workspace.id,
+            &first_binding.repo_id,
+            &first_binding.worktree_path,
+            false,
+        )
+        .expect("remove first binding");
+        let remaining = &response.registry.workspaces[0];
+
+        assert_eq!(response.registry.workspaces.len(), 1);
+        assert_eq!(remaining.repo_bindings.len(), 1);
+        assert_eq!(remaining.repo_bindings[0].repo_id, second.id);
+        assert_eq!(remaining.active_repo_id, second.id);
+        assert_eq!(
+            remaining.repo_bindings[0].binding_kind,
+            WorkspaceRepoBindingKind::Worktree
+        );
+
+        remove_workspace_worktree(
+            &remaining.id,
+            &remaining.repo_bindings[0].repo_id,
+            &remaining.repo_bindings[0].worktree_path,
+            true,
+        )
+        .expect("cleanup remaining binding");
+        fs::remove_dir_all(first_repo).expect("remove first repo");
+        fs::remove_dir_all(second_repo).expect("remove second repo");
+        fs::remove_dir_all(&home.path).expect("remove home");
+    }
+
+    struct TestHome {
+        path: PathBuf,
+        original_home: Option<std::ffi::OsString>,
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for TestHome {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(original) = &self.original_home {
+                    std::env::set_var("HOME", original);
+                } else {
+                    std::env::remove_var("HOME");
+                }
+            }
+        }
+    }
+
+    fn test_home(label: &str) -> TestHome {
+        let guard = TEST_HOME_LOCK.lock().expect("lock test home");
+        let path = temp_path(label);
+        fs::create_dir_all(&path).expect("create home");
+        let original_home = std::env::var_os("HOME");
+        unsafe {
+            std::env::set_var("HOME", &path);
+        }
+        TestHome {
+            path,
+            original_home,
+            _guard: guard,
+        }
+    }
+
+    fn initialized_repo(label: &str) -> PathBuf {
+        let root = temp_path(label);
+        git::run_git(".", &["init", root.to_str().expect("utf8 temp path")]).expect("git init");
+        git::run_git(&root, &["config", "user.email", "loom@example.com"]).expect("config email");
+        git::run_git(&root, &["config", "user.name", "Loom"]).expect("config name");
+        fs::write(root.join("README.md"), "test").expect("write readme");
+        git::run_git(&root, &["add", "README.md"]).expect("add readme");
+        git::run_git(&root, &["commit", "-m", "init"]).expect("commit readme");
+        root
+    }
+
+    fn temp_path(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("loom-repository-test-{label}-{nanos}"))
     }
 }

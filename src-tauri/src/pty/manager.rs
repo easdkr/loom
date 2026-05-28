@@ -575,7 +575,7 @@ impl PtyManager {
         let mut timed_out = false;
         let mut error_class = None;
         let mut empty_output_since: Option<Instant> = None;
-        let empty_output_grace = Duration::from_millis(provider.idle_timeout_ms);
+        let empty_output_grace = croxy_empty_output_grace(provider.settle_ms);
 
         loop {
             match events.recv_timeout(Duration::from_millis(100)) {
@@ -597,6 +597,16 @@ impl PtyManager {
                         waiting_for,
                         ..
                     } => {
+                        if croxy_should_start_empty_output_grace(
+                            &status,
+                            task.interactive,
+                            &assistant_content,
+                            &result,
+                        ) {
+                            empty_output_since.get_or_insert_with(Instant::now);
+                        } else if status != "idle" {
+                            empty_output_since = None;
+                        }
                         let activity = waiting_for
                             .map(|value| format!("{status}: {value}"))
                             .unwrap_or(status);
@@ -651,6 +661,11 @@ impl PtyManager {
                             emit_croxy_activity(app, &node_id, &assistant_content, None);
                         }
                         if is_error {
+                            if croxy_can_complete_with_partial_answer(&assistant_content) {
+                                result = assistant_content.trim().to_string();
+                                completion_reason = "croxy-partial-after-error".to_string();
+                                break;
+                            }
                             exit_code = Some(1);
                             error_class = Some(ErrorClass::ProviderError);
                             break;
@@ -677,6 +692,11 @@ impl PtyManager {
                         break;
                     }
                     EngineEvent::Error { message, .. } => {
+                        if croxy_can_complete_with_partial_answer(&assistant_content) {
+                            result = assistant_content.trim().to_string();
+                            completion_reason = "croxy-partial-after-error".to_string();
+                            break;
+                        }
                         result = message;
                         exit_code = Some(1);
                         error_class = Some(ErrorClass::ProviderError);
@@ -784,6 +804,23 @@ fn croxy_output_is_empty(assistant_content: &str, result: &str) -> bool {
 
 fn croxy_empty_output_grace_elapsed(empty_output_since: Option<Instant>, grace: Duration) -> bool {
     empty_output_since.is_some_and(|since| since.elapsed() >= grace)
+}
+
+fn croxy_empty_output_grace(settle_ms: u64) -> Duration {
+    Duration::from_millis(settle_ms.max(1000))
+}
+
+fn croxy_should_start_empty_output_grace(
+    status: &str,
+    interactive: bool,
+    assistant_content: &str,
+    result: &str,
+) -> bool {
+    !interactive && status == "idle" && croxy_output_is_empty(assistant_content, result)
+}
+
+fn croxy_can_complete_with_partial_answer(assistant_content: &str) -> bool {
+    !assistant_content.trim().is_empty()
 }
 
 fn write_croxy_input(session: &ActiveCroxySession, input: &str) -> Result<(), String> {
@@ -919,8 +956,9 @@ fn generate_node_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        INLINE_PROMPT_BYTE_LIMIT, PromptMaterialization, croxy_empty_output_grace_elapsed,
-        croxy_output_is_empty, prompt_for_provider,
+        INLINE_PROMPT_BYTE_LIMIT, PromptMaterialization, croxy_can_complete_with_partial_answer,
+        croxy_empty_output_grace, croxy_empty_output_grace_elapsed, croxy_output_is_empty,
+        croxy_should_start_empty_output_grace, prompt_for_provider,
     };
     use crate::pty::providers::{ProviderInputMode, default_provider_configs};
     use crate::pty::text::normalize_display_text;
@@ -966,6 +1004,33 @@ mod tests {
             Some(Instant::now() - Duration::from_millis(11)),
             grace
         ));
+    }
+
+    #[test]
+    fn croxy_empty_output_grace_uses_settle_window() {
+        assert_eq!(croxy_empty_output_grace(1200), Duration::from_millis(1200));
+        assert_eq!(croxy_empty_output_grace(200), Duration::from_millis(1000));
+    }
+
+    #[test]
+    fn croxy_idle_without_output_starts_empty_output_grace() {
+        assert!(croxy_should_start_empty_output_grace("idle", false, "", ""));
+        assert!(!croxy_should_start_empty_output_grace(
+            "busy", false, "", ""
+        ));
+        assert!(!croxy_should_start_empty_output_grace("idle", true, "", ""));
+        assert!(!croxy_should_start_empty_output_grace(
+            "idle",
+            false,
+            "assistant text",
+            ""
+        ));
+    }
+
+    #[test]
+    fn croxy_partial_answer_can_survive_late_transport_error() {
+        assert!(croxy_can_complete_with_partial_answer("partial answer"));
+        assert!(!croxy_can_complete_with_partial_answer("  \n"));
     }
 
     #[test]

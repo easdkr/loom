@@ -133,6 +133,14 @@ struct WorkspaceRemoveRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct WorkspaceWorktreeRemoveRequest {
+    workspace_id: String,
+    repo_id: String,
+    worktree_path: String,
+    force: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct WorkspaceStatusRequest {
     workspace_id: String,
 }
@@ -347,6 +355,18 @@ fn workspace_remove(
 }
 
 #[tauri::command]
+fn workspace_worktree_remove(
+    request: WorkspaceWorktreeRemoveRequest,
+) -> Result<repository::WorkspaceMutationResponse, String> {
+    repository::remove_workspace_worktree(
+        &request.workspace_id,
+        &request.repo_id,
+        &request.worktree_path,
+        request.force,
+    )
+}
+
+#[tauri::command]
 fn workspace_status(
     request: WorkspaceStatusRequest,
 ) -> Result<repository::WorkspaceStatusResponse, String> {
@@ -435,6 +455,7 @@ pub fn run() {
             repo_clone,
             workspace_create,
             workspace_remove,
+            workspace_worktree_remove,
             workspace_status,
             workspace_graph_save,
             workspace_graph_load,
